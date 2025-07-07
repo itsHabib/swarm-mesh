@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = { workspace = true }
+bincode = { workspace = true }
 hex = { workspace = true }
 mesh = { path = "../../crates/mesh" }
 node = { path = "../../crates/node" }
