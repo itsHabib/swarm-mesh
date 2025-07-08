@@ -102,13 +102,13 @@ impl Node {
                         Ok(Some(msg)) => {
                             let mut unicast_addr = src_addr;
                             unicast_addr.set_port(payload.unicast_port);
-                            println!("Sending start handshake response to {}", unicast_addr);
+                            info!(unicast_addr = unicast_addr.to_string(), "Sending start handshake response");
 
                             if let Err(e) = self
                                 .send_unicast_message(msg, payload.unicast_port, src_addr)
                                 .await
                             {
-                                eprintln!("Error sending handshake response: {}", e);
+                                error!(error = %e, "Error sending handshake response");
                             }
                         }
                         Ok(None) => continue,
@@ -116,7 +116,7 @@ impl Node {
                             continue; // Skip sending a message
                         }
                         Err(e) => {
-                            eprintln!("Error handling HELLO: {}", e);
+                            error!(error = %e, "Error handling HELLO");
                         }
                     };
                 }
@@ -133,24 +133,24 @@ impl Node {
                     {
                         Ok(msg) => msg,
                         Err(e) => {
-                            eprintln!("Error handling handshake: {}", e);
+                            error!("Error handling handshake: {}", e);
                             continue; // Skip sending a message
                         }
                     };
 
                     let mut unicast_addr = src_addr;
                     unicast_addr.set_port(unicast_port);
-                    println!("Sending handshake response to {}", unicast_addr);
+                    info!(unicast_addr = %unicast_addr, "sending handshake response");
 
                     if let Err(e) = self
                         .send_unicast_message(msg, unicast_port, unicast_addr)
                         .await
                     {
-                        eprintln!("Error sending handshake response: {}", e);
+                        error!(error = %e, "error sending handshake response");
                     }
                 }
                 _ => {
-                    println!("Received unknown message from {}", src_addr);
+                    info!(src_addr = %src_addr, "received unknown message from");
                 }
             }
         }
@@ -296,11 +296,11 @@ impl Node {
         session_db_recv: SessionDb,
         src_addr: SocketAddr,
     ) -> Result<Message> {
-        println!(
-            "Received HANDSHAKE from {} @{}, msg len: {}",
-            node_id,
-            src_addr,
-            msg.len()
+        info!(
+            node_id = node_id,
+            src_addr = %src_addr,
+            msg_len = msg.len(),
+            "received HANDSHAKE",
         );
 
         let mut db = session_db_recv.lock().await;
@@ -308,7 +308,7 @@ impl Node {
             Some(session) => session,
             None => {
                 if self.id < node_id {
-                    println!("Creating responder session from unknown peer {}", node_id);
+                    info!(node_id = node_id, "Creating responder session from unknown peer {}", node_id);
                     db.insert(
                         node_id,
                         PeerSession {
@@ -325,11 +325,12 @@ impl Node {
             }
         };
 
-        println!("Found session for node {}", node_id);
+        info!(node_id = node_id, "Found session for node {}", node_id);
 
         match std::mem::replace(&mut peer_session.noise, NoiseState::Transitioning) {
             NoiseState::ExpectingInitiator => {
-                println!(
+                info!(
+                    node_id = self.id,
                     "Node {}: acting as responder for handshake(EXPECTINGINITIATIOR)",
                     self.id
                 );
@@ -351,13 +352,14 @@ impl Node {
                 }))
             }
             NoiseState::Handshaking(mut state) => {
-                println!(
-                    "Node {}: continuing handshake with existing state(HANDSHAKING)",
-                    self.id
+                info!(
+                    node_id = self.id,
+                    "continuing handshake with existing state(HANDSHAKING)",
                 );
+
                 let mut read_buf = [0u8; 1024];
                 if let Err(e) = state.read_message(&msg, &mut read_buf) {
-                    eprintln!("Error reading message from {}: {}", src_addr, e);
+                    error!(error = %e, src_addr = %src_addr, "error reading message");
                     return Err(anyhow!("unable to read msg"));
                 }
 
@@ -367,7 +369,7 @@ impl Node {
                     .context("error writing message")?;
 
                 if state.is_handshake_finished() {
-                    println!("Hanshake with {} completed, session is now secure", node_id);
+                    info!(node_id = node_id, "handshake completed, session is now secure");
 
                     let transport_state = state
                         .into_transport_mode()
@@ -375,9 +377,9 @@ impl Node {
 
                     peer_session.noise = NoiseState::Transport(transport_state);
                 } else {
-                    println!(
-                        "Handshake with {} not yet complete, still in handshaking state",
-                        node_id
+                    info!(
+                        node_id = node_id,
+                        "Handshake  not yet complete, still in handshaking state",
                     );
                     peer_session.noise = NoiseState::Handshaking(state);
                 }

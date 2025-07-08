@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use tokio::{net::UdpSocket, sync::Mutex};
-use tracing;
+use tracing::{info};
 use tracing_log::LogTracer;
 use tracing_subscriber::{EnvFilter, fmt};
 
@@ -42,26 +42,27 @@ async fn main() -> Result<()> {
 
 async fn init_node() -> Result<Arc<Node>> {
     let node_id: mesh::NodeId = rand::random();
-    println!("Starting node with ID: {}", node_id);
+    info!(node_id = node_id, "Starting node with ID");
 
     let np = "Noise_XX_25519_ChaChaPoly_BLAKE2s".parse()?;
     let builder = Builder::new(np);
     let static_keys = builder.generate_keypair()?;
-    println!(
-        "Our Node ID (public key): {}",
-        hex::encode(&static_keys.public)
+    info!(
+        public_key = hex::encode(&static_keys.public),
+        "Our Node ID (public key)",
     );
 
     let multicast_socket = create_multicast_socket()
         .await
         .context("Failed to create multicast socket")?;
-    println!(
-        "Listening for mesh traffic on multicast {}:{}",
-        MULTICAST_ADDR, MULTICAST_PORT
+    info!(
+        multicast_addr = MULTICAST_ADDR,
+        multicast_port = MULTICAST_PORT,
+        "Listening for mesh traffic on multicast",
     );
     let unicast_socket = UdpSocket::bind("0.0.0.0:0").await?;
     let unicast_port = unicast_socket.local_addr()?.port();
-    println!("Unicast listening on port: {}", unicast_port);
+    info!(unicast_port = unicast_port, "Unicast listening on port: {}", unicast_port);
 
     let link_state_db: node::LinkStateDb = Arc::new(Mutex::new(HashMap::new()));
     let session_state_db: node::SessionDb = Arc::new(Mutex::new(HashMap::new()));
