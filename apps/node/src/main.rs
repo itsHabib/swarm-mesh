@@ -8,8 +8,7 @@ use std::sync::Arc;
 use tokio::{net::UdpSocket, sync::Mutex};
 use tracing;
 use tracing_log::LogTracer;
-use tracing_subscriber::{fmt, EnvFilter};
-
+use tracing_subscriber::{EnvFilter, fmt};
 
 const NETWORK_KEY: [u8; 32] = [
     0x67, 0xa5, 0x0f, 0x77, 0xa3, 0x51, 0x73, 0xdc, 0xc2, 0xa1, 0x29, 0xf1, 0xd8, 0xb8, 0x52, 0xa5,
@@ -17,7 +16,6 @@ const NETWORK_KEY: [u8; 32] = [
 ];
 const MULTICAST_ADDR: &str = "224.0.0.1";
 const MULTICAST_PORT: u16 = 9999;
-
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -32,6 +30,10 @@ async fn main() -> Result<()> {
     let broadcast_node = node.clone();
     let multicast_addr: SocketAddr = format!("{}:{}", MULTICAST_ADDR, MULTICAST_PORT).parse()?;
     tokio::spawn(async move { broadcast_node.broadcast(multicast_addr).await });
+
+    // -- Ping Task ---
+    let ping_node = node.clone();
+    tokio::spawn(async move { ping_node.ping_peers().await });
 
     tokio::signal::ctrl_c().await?;
 
@@ -63,10 +65,11 @@ async fn init_node() -> Result<Arc<Node>> {
 
     let link_state_db: node::LinkStateDb = Arc::new(Mutex::new(HashMap::new()));
     let session_state_db: node::SessionDb = Arc::new(Mutex::new(HashMap::new()));
+    let ping_state_db: node::PingDb = Arc::new(Mutex::new(HashMap::new()));
+    let state = State::new(link_state_db, session_state_db, ping_state_db);
+
     let multicast_socket = Arc::new(multicast_socket);
     let unicast_socket = Arc::new(unicast_socket);
-
-    let state = State::new(link_state_db, session_state_db);
     let connection = Connection::new(
         unicast_port,
         unicast_socket.clone(),

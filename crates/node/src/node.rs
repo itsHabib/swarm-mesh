@@ -1,15 +1,11 @@
 use crate::{
     connection::Connection,
-    state::{SessionDb, State},
+    state::{PingDb, SessionDb, State},
 };
 use anyhow::{Context, Result, anyhow};
+use futures::future::join_all;
 use mesh::{
-    Error as MeshError,
-    HandshakePayload,
-    HelloPayload,
-    Message,
-    NoiseState,
-    PeerInfo,
+    Error as MeshError, HandshakePayload, HelloPayload, Message, NodeId, NoiseState, PeerInfo,
     PeerSession,
 };
 use noise;
@@ -20,7 +16,8 @@ use tokio::net::UdpSocket;
 use tokio::time;
 use tracing::{error, info};
 
-const HELLO_INTERVAL_MS: u64 = 5000;
+const HELLO_INTERVAL_MS: u64 = 15000;
+const PING_INTERVAL_MS: u64 = 8000;
 
 pub struct Node {
     id: u32,
@@ -88,10 +85,12 @@ impl Node {
                             .and_modify(|p| {
                                 p.last_seen = Instant::now();
                                 p.addr = src_addr;
+                                p.port = payload.unicast_port;
                             })
                             .or_insert(PeerInfo {
                                 last_seen: Instant::now(),
                                 addr: src_addr,
+                                port: payload.unicast_port,
                             });
                         continue;
                     }
@@ -106,7 +105,7 @@ impl Node {
                             println!("Sending start handshake response to {}", unicast_addr);
 
                             if let Err(e) = self
-                                .send_message(msg, unicast_addr, &self.connection.unicast_socket)
+                                .send_unicast_message(msg, payload.unicast_port, src_addr)
                                 .await
                             {
                                 eprintln!("Error sending handshake response: {}", e);
@@ -144,7 +143,7 @@ impl Node {
                     println!("Sending handshake response to {}", unicast_addr);
 
                     if let Err(e) = self
-                        .send_message(msg, unicast_addr, &self.connection.unicast_socket)
+                        .send_unicast_message(msg, unicast_port, unicast_addr)
                         .await
                     {
                         eprintln!("Error sending handshake response: {}", e);
@@ -167,19 +166,62 @@ impl Node {
             interval.tick().await;
 
             if let Err(e) = self
-                .send_message(
+                .send_multicast_message(
                     Message::Hello(HelloPayload {
                         node_id: self.id,
                         unicast_port: self.connection.unicast_port,
                     }),
                     addr,
-                    &self.connection.multicast_socket,
                 )
                 .await
                 .context("failed to send broadcast message")
             {
                 error!("error sending broadcast message: {}", e);
             }
+        }
+    }
+
+    pub async fn ping_peers(&self) -> ! {
+        let mut interval = time::interval_at(
+            time::Instant::now() + Duration::from_millis(PING_INTERVAL_MS),
+            Duration::from_millis(PING_INTERVAL_MS),
+        );
+        let link_db = self.state.link_db.clone();
+        let ping_db = self.state.ping_db.clone();
+        let mut sequence = 0u64;
+
+        loop {
+            interval.tick().await;
+            sequence += 1;
+
+            self.clean_stale_pings().await;
+
+            let peers: Vec<_> = {
+                let db = link_db.lock().await;
+                db.iter()
+                    .map(|(id, info)| (*id, info.port, info.addr))
+                    .collect()
+            };
+
+            if peers.is_empty() {
+                info!("No peers to ping");
+                continue;
+            }
+
+            let pings: Vec<_> = peers
+                .iter()
+                .map(|(id, port, addr)| {
+                    self.send_ping(ping_db.clone(), *id, *port, sequence, *addr)
+                })
+                .collect();
+
+            let results = join_all(pings).await;
+            let success = results.iter().filter(|r| r.is_ok()).count();
+            info!(
+                "successfully sent pings to {} peers, failed {} pings",
+                success,
+                results.len() - success
+            );
         }
     }
 
@@ -354,19 +396,69 @@ impl Node {
         }
     }
 
+    async fn clean_stale_pings(&self) {
+        let ping_db = self.state.ping_db.clone();
+        let mut ping_db = ping_db.lock().await;
+        let timeout = Duration::from_secs(30);
+        let now = Instant::now();
+
+        ping_db.retain(|_, ping| now.duration_since(*ping) > timeout);
+    }
+
+    async fn send_ping(
+        &self,
+        ping_db: PingDb,
+        node_id: NodeId,
+        unicast_port: u16,
+        sequence: u64,
+        addr: SocketAddr,
+    ) -> Result<()> {
+        let mut ping_db = ping_db.lock().await;
+        ping_db.insert((node_id, sequence), Instant::now());
+        drop(ping_db);
+
+        self.send_unicast_message(
+            Message::Ping(mesh::PingPayload { node_id, sequence }),
+            unicast_port,
+            addr,
+        )
+        .await
+        .context(format!("failed to send ping message to node {}", node_id))
+    }
+
+    async fn send_unicast_message(&self, msg: Message, port: u16, addr: SocketAddr) -> Result<()> {
+        let mut unicast_addr = addr;
+        unicast_addr.set_port(port);
+
+        self.send_message(msg, addr, &self.connection.unicast_socket)
+            .await
+            .context(format!("failed to send unicast message to {}", addr))
+    }
+
+    async fn send_multicast_message(&self, msg: Message, addr: SocketAddr) -> Result<()> {
+        self.send_message(msg, addr, &self.connection.multicast_socket)
+            .await
+            .context(format!("failed to send multicast message to {}", addr))
+    }
+
     async fn send_message(
         &self,
         msg: Message,
         addr: SocketAddr,
         socket: &Arc<UdpSocket>,
     ) -> Result<()> {
-        socket
-            .send_to(
+        if let Err(e) = time::timeout(
+            Duration::from_secs(5),
+            socket.send_to(
                 &bincode::serialize(&msg).context("error serializing message")?,
                 addr,
-            )
-            .await
-            .context("error sending message to socket")?;
+            ),
+        )
+        .await
+        {
+            error!("timeout sending message to {}: {}", addr, e);
+            return Err(anyhow!("failed to send message to {}: {}", addr, e));
+        }
 
         Ok(())
     }
