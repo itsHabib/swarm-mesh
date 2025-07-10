@@ -1,12 +1,13 @@
 use anyhow::{Context, Result};
 use node::{Connection, Node, State};
+use noise;
 use snow::Builder;
 use socket2::{Domain, Protocol, Socket, Type};
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use tokio::{net::UdpSocket, sync::Mutex};
-use tracing::{info};
+use tracing::info;
 use tracing_log::LogTracer;
 use tracing_subscriber::{EnvFilter, fmt};
 
@@ -44,7 +45,7 @@ async fn init_node() -> Result<Arc<Node>> {
     let node_id: mesh::NodeId = rand::random();
     info!(node_id = node_id, "Starting node with ID");
 
-    let np = "Noise_XX_25519_ChaChaPoly_BLAKE2s".parse()?;
+    let np = noise::noise_params().context("Failed to create noise parameters")?;
     let builder = Builder::new(np);
     let static_keys = builder.generate_keypair()?;
     info!(
@@ -62,7 +63,10 @@ async fn init_node() -> Result<Arc<Node>> {
     );
     let unicast_socket = UdpSocket::bind("0.0.0.0:0").await?;
     let unicast_port = unicast_socket.local_addr()?.port();
-    info!(unicast_port = unicast_port, "Unicast listening on port: {}", unicast_port);
+    info!(
+        unicast_port = unicast_port,
+        "Unicast listening on port: {}", unicast_port
+    );
 
     let link_state_db: node::LinkStateDb = Arc::new(Mutex::new(HashMap::new()));
     let session_state_db: node::SessionDb = Arc::new(Mutex::new(HashMap::new()));

@@ -27,7 +27,7 @@ pub fn build_responder(static_keys: &snow::Keypair, network_key: &[u8]) -> Resul
         .context("Failed to build responder state")
 }
 
-fn noise_params() -> Result<NoiseParams> {
+pub fn noise_params() -> Result<NoiseParams> {
     "Noise_XXpsk3_25519_ChaChaPoly_BLAKE2s"
         .parse::<NoiseParams>()
         .context("Invalid noise params")

@@ -1,5 +1,6 @@
 use crate::NodeId;
 use serde::{Deserialize, Serialize};
+use snow::HandshakeState;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct HelloPayload {
@@ -18,21 +19,13 @@ pub struct HandshakePayload {
 pub enum Message {
     Hello(HelloPayload),
     Handshake(HandshakePayload),
-    Ping(PingPayload),
-    Pong(PongPayload),
+    Ping(PingPongPayload),
+    Pong(PingPongPayload),
     EncryptedData(Vec<u8>),
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct PingPayload {
+pub struct PingPongPayload {
     pub node_id: NodeId,
     pub sequence: u64,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct PongPayload {
-    pub node_id: NodeId,
-    pub sequence: u64,
-    pub ping_timestamp: u64,
-    pub pong_timestamp: u64,
 }

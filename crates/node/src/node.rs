@@ -6,7 +6,7 @@ use anyhow::{Context, Result, anyhow};
 use futures::future::join_all;
 use mesh::{
     Error as MeshError, HandshakePayload, HelloPayload, Message, NodeId, NoiseState, PeerInfo,
-    PeerSession,
+    PeerSession, PingPongPayload, RttStats,
 };
 use noise;
 use std::net::SocketAddr;
@@ -71,6 +71,43 @@ impl Node {
             };
 
             match msg {
+                Message::Ping(payload) => {
+                    if payload.node_id == self.id {
+                        continue;
+                    }
+                    info!(
+                        node_id = payload.node_id,
+                        sequence = payload.sequence,
+                        src_addr = %src_addr,
+                        "received ping!!! from peer",
+                    );
+
+                    match self.handle_ping(&payload).await {
+                        Ok(Some((unicast_port, pong))) => {
+                            if let Err(e) = self
+                                .send_unicast_message(pong, unicast_port, src_addr)
+                                .await
+                            {
+                                error!(error = %e, "error sending pong response");
+                            }
+                        }
+                        Ok(None) => {
+                            continue;
+                        }
+                        Err(e) => {
+                            error!(error = %e, "error handling ping");
+                        }
+                    }
+                }
+                Message::Pong(payload) => {
+                    if payload.node_id == self.id {
+                        continue;
+                    }
+
+                    if let Err(e) = self.handle_pong(&payload).await {
+                        error!(error = %e, "error handling pong");
+                    }
+                }
                 Message::Hello(payload) => {
                     if payload.node_id == self.id {
                         // ignore our own messages
@@ -83,15 +120,9 @@ impl Node {
                             .await
                             .entry(payload.node_id)
                             .and_modify(|p| {
-                                p.last_seen = Instant::now();
-                                p.addr = src_addr;
-                                p.port = payload.unicast_port;
+                                p.update(src_addr, payload.unicast_port);
                             })
-                            .or_insert(PeerInfo {
-                                last_seen: Instant::now(),
-                                addr: src_addr,
-                                port: payload.unicast_port,
-                            });
+                            .or_insert(PeerInfo::new(src_addr, payload.unicast_port));
                         continue;
                     }
 
@@ -102,7 +133,12 @@ impl Node {
                         Ok(Some(msg)) => {
                             let mut unicast_addr = src_addr;
                             unicast_addr.set_port(payload.unicast_port);
-                            info!(unicast_addr = unicast_addr.to_string(), "Sending start handshake response");
+                            info!(
+                                unicast_addr = unicast_addr.to_string(),
+                                "Sending start handshake response"
+                            );
+
+                            info!("About to call send_unicast_message"); // Add this line
 
                             if let Err(e) = self
                                 .send_unicast_message(msg, payload.unicast_port, src_addr)
@@ -110,6 +146,8 @@ impl Node {
                             {
                                 error!(error = %e, "Error sending handshake response");
                             }
+
+                            info!("after send_unicast_message"); // Add this line
                         }
                         Ok(None) => continue,
                         Err(MeshError::AlreadyConnected) => {
@@ -131,7 +169,8 @@ impl Node {
                         .handle_handshake(payload, session_db_recv.clone(), src_addr)
                         .await
                     {
-                        Ok(msg) => msg,
+                        Ok(Some(msg)) => msg,
+                        Ok(None) => continue,
                         Err(e) => {
                             error!("Error handling handshake: {}", e);
                             continue; // Skip sending a message
@@ -142,10 +181,7 @@ impl Node {
                     unicast_addr.set_port(unicast_port);
                     info!(unicast_addr = %unicast_addr, "sending handshake response");
 
-                    if let Err(e) = self
-                        .send_unicast_message(msg, unicast_port, unicast_addr)
-                        .await
-                    {
+                    if let Err(e) = self.send_unicast_message(msg, unicast_port, src_addr).await {
                         error!(error = %e, "error sending handshake response");
                     }
                 }
@@ -188,6 +224,7 @@ impl Node {
         );
         let link_db = self.state.link_db.clone();
         let ping_db = self.state.ping_db.clone();
+        let session_db = self.state.session_db.clone();
         let mut sequence = 0u64;
 
         loop {
@@ -197,14 +234,22 @@ impl Node {
             self.clean_stale_pings().await;
 
             let peers: Vec<_> = {
-                let db = link_db.lock().await;
-                db.iter()
-                    .map(|(id, info)| (*id, info.port, info.addr))
+                let link_db = link_db.lock().await;
+                let session_db = session_db.lock().await;
+
+                link_db
+                    .iter()
+                    .filter_map(|(id, info)| {
+                        session_db.get(id).and_then(|s| {
+                            matches!(s.noise, NoiseState::Transport(_))
+                                .then_some((*id, info.port, info.addr))
+                        })
+                    })
                     .collect()
             };
 
             if peers.is_empty() {
-                info!("No peers to ping");
+                info!("no peers to ping");
                 continue;
             }
 
@@ -217,11 +262,132 @@ impl Node {
 
             let results = join_all(pings).await;
             let success = results.iter().filter(|r| r.is_ok()).count();
+
             info!(
                 "successfully sent pings to {} peers, failed {} pings",
                 success,
                 results.len() - success
             );
+        }
+    }
+
+    async fn handle_ping(&self, payload: &PingPongPayload) -> Result<Option<(u16, Message)>> {
+        if !self.can_take_ping(payload).await {
+            return Ok(None);
+        }
+
+        info!(
+            node_id = payload.node_id,
+            sequence = payload.sequence,
+            "received valid ping from peer",
+        );
+
+        let link_db = self.state.link_db.clone();
+        let link_db = link_db.lock().await;
+        let peer_info = match link_db.get(&payload.node_id) {
+            Some(info) => info,
+            None => {
+                return Ok(None);
+            }
+        };
+        let unicast_port = peer_info.port;
+
+        let msg = PingPongPayload {
+            node_id: self.id,
+            sequence: payload.sequence,
+        };
+
+        Ok(Some((unicast_port, Message::Pong(msg))))
+    }
+
+    async fn handle_pong(&self, payload: &PingPongPayload) -> Result<()> {
+        let (k, ping_ts) = match self.can_take_pong(payload).await {
+            Some((id, seq)) => (id, seq),
+            None => return Ok(()),
+        };
+
+        info!(
+            node_id = k.0,
+            sequence = k.1,
+            "received valid pong from peer",
+        );
+
+        let link_db = self.state.link_db.clone();
+        let mut link_db = link_db.lock().await;
+
+        match link_db.get_mut(&k.0) {
+            Some(p) => {
+                p.rtt_stats
+                    .get_or_insert_with(RttStats::default)
+                    .update(Instant::now().duration_since(ping_ts));
+                self.state.ping_db.lock().await.remove(&k);
+            }
+            None => {}
+        }
+
+        Ok(())
+    }
+
+    async fn can_take_ping(&self, payload: &PingPongPayload) -> bool {
+        let link_db = self.state.link_db.clone();
+        let session_db = self.state.session_db.clone();
+
+        link_db.lock().await.contains_key(&payload.node_id)
+            && matches!(
+                session_db.lock().await.get(&payload.node_id),
+                Some(PeerSession {
+                    noise: NoiseState::Transport(_)
+                }),
+            )
+    }
+
+    async fn can_take_pong(&self, payload: &PingPongPayload) -> Option<((NodeId, u64), Instant)> {
+        let link_db = self.state.link_db.clone();
+        let ping_db = self.state.ping_db.clone();
+        let session_db = self.state.session_db.clone();
+
+        if !link_db.lock().await.contains_key(&payload.node_id) {
+            info!(
+                node_id = payload.node_id,
+                "received ping/pong from unknown peer, ignoring"
+            );
+            return None;
+        }
+
+        if !matches!(
+            session_db.lock().await.get(&payload.node_id),
+            Some(PeerSession {
+                noise: NoiseState::Transport(_)
+            }),
+        ) {
+            info!(
+                node_id = payload.node_id,
+                "received ping/pong from peer without secure session, ignoring"
+            );
+            return None;
+        }
+
+        match ping_db
+            .lock()
+            .await
+            .get(&(payload.node_id, payload.sequence))
+        {
+            Some(ping_ts) => {
+                info!(
+                    node_id = payload.node_id,
+                    sequence = payload.sequence,
+                    "received ping/pong with known sequence",
+                );
+                Some(((payload.node_id, payload.sequence), *ping_ts))
+            }
+            None => {
+                info!(
+                    node_id = payload.node_id,
+                    sequence = payload.sequence,
+                    "received ping/pong with unknown sequence, ignoring",
+                );
+                None
+            }
         }
     }
 
@@ -291,11 +457,11 @@ impl Node {
         HandshakePayload {
             node_id,
             msg,
-            unicast_port: udp_port,
+            unicast_port: _unicast_port,
         }: HandshakePayload,
         session_db_recv: SessionDb,
         src_addr: SocketAddr,
-    ) -> Result<Message> {
+    ) -> Result<Option<Message>> {
         info!(
             node_id = node_id,
             src_addr = %src_addr,
@@ -308,7 +474,10 @@ impl Node {
             Some(session) => session,
             None => {
                 if self.id < node_id {
-                    info!(node_id = node_id, "Creating responder session from unknown peer {}", node_id);
+                    info!(
+                        node_id = node_id,
+                        "Creating responder session from unknown peer {}", node_id
+                    );
                     db.insert(
                         node_id,
                         PeerSession {
@@ -331,8 +500,7 @@ impl Node {
             NoiseState::ExpectingInitiator => {
                 info!(
                     node_id = self.id,
-                    "Node {}: acting as responder for handshake(EXPECTINGINITIATIOR)",
-                    self.id
+                    "Node {}: acting as responder for handshake(EXPECTINGINITIATIOR)", self.id
                 );
                 let mut responder_state =
                     noise::build_responder(&self.static_keys, &self.network_key)?;
@@ -345,11 +513,11 @@ impl Node {
 
                 peer_session.noise = NoiseState::Handshaking(responder_state);
 
-                Ok(Message::Handshake(HandshakePayload {
+                Ok(Some(Message::Handshake(HandshakePayload {
                     node_id: self.id,
                     msg: write_buf[..len].to_vec(),
-                    unicast_port: udp_port,
-                }))
+                    unicast_port: self.connection.unicast_port,
+                })))
             }
             NoiseState::Handshaking(mut state) => {
                 info!(
@@ -363,13 +531,35 @@ impl Node {
                     return Err(anyhow!("unable to read msg"));
                 }
 
+                if state.is_handshake_finished() {
+                    info!(
+                        node_id = node_id,
+                        "handshake completed, session is now secure"
+                    );
+
+                    let transport_state = state
+                        .into_transport_mode()
+                        .context("error converting to transport mode")?;
+
+                    peer_session.noise = NoiseState::Transport(transport_state);
+
+                    return Ok(None);
+                }
+
                 let mut write_buf = [0u8; 1024];
-                let len = state
-                    .write_message(&[], &mut write_buf)
-                    .context("error writing message")?;
+                let len = match state.write_message(&[], &mut write_buf) {
+                    Ok(len) => len,
+                    Err(e) => {
+                        error!(error = %e, "error writing message");
+                        return Err(anyhow!("unable to write msg"));
+                    }
+                };
 
                 if state.is_handshake_finished() {
-                    info!(node_id = node_id, "handshake completed, session is now secure");
+                    info!(
+                        node_id = node_id,
+                        "handshake completed, session is now secure"
+                    );
 
                     let transport_state = state
                         .into_transport_mode()
@@ -384,11 +574,11 @@ impl Node {
                     peer_session.noise = NoiseState::Handshaking(state);
                 }
 
-                Ok(Message::Handshake(HandshakePayload {
+                Ok(Some(Message::Handshake(HandshakePayload {
                     node_id: self.id,
                     msg: write_buf[..len].to_vec(),
-                    unicast_port: udp_port,
-                }))
+                    unicast_port: self.connection.unicast_port,
+                })))
             }
             other_state => {
                 let err = anyhow!("unexpected noise state: {:?}", other_state);
@@ -420,7 +610,10 @@ impl Node {
         drop(ping_db);
 
         self.send_unicast_message(
-            Message::Ping(mesh::PingPayload { node_id, sequence }),
+            Message::Ping(PingPongPayload {
+                node_id: self.id,
+                sequence,
+            }),
             unicast_port,
             addr,
         )
@@ -432,9 +625,17 @@ impl Node {
         let mut unicast_addr = addr;
         unicast_addr.set_port(port);
 
-        self.send_message(msg, addr, &self.connection.unicast_socket)
+        info!(
+            dest_addr = %unicast_addr,
+            "attempting to send unicast message"
+        );
+
+        self.send_message(msg, unicast_addr, &self.connection.unicast_socket)
             .await
-            .context(format!("failed to send unicast message to {}", addr))
+            .context(format!(
+                "failed to send unicast message to {}",
+                unicast_addr
+            ))
     }
 
     async fn send_multicast_message(&self, msg: Message, addr: SocketAddr) -> Result<()> {

@@ -9,6 +9,7 @@ bincode = { workspace = true }
 hex = { workspace = true }
 mesh = { path = "../../crates/mesh" }
 node = { path = "../../crates/node" }
+noise = { path = "../../crates/noise" }
 rand = { workspace = true }
 snow = { workspace =  true}
 socket2 = { workspace = true, features = ["all"] }

@@ -506,6 +506,7 @@ dependencies = [
  "hex",
  "mesh",
  "node",
+ "noise",
  "rand",
  "snow",
  "socket2 0.6.0",
