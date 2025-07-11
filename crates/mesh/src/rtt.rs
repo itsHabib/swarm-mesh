@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 /// Round-trip time (RTT) statistics for network performance monitoring.
-/// 
+///
 /// This struct tracks various RTT metrics for a peer connection, including
 /// current, average, minimum, and maximum round-trip times. It uses an
 /// exponential moving average to smooth out RTT fluctuations while remaining
@@ -22,15 +22,15 @@ pub struct RttStats {
 
 impl RttStats {
     /// Updates the RTT statistics with a new measurement.
-    /// 
+    ///
     /// This method incorporates a new RTT measurement into the statistics,
     /// updating the current RTT, min/max values, and the exponential moving
     /// average. The moving average uses an alpha value of 0.125 (1/8) which
     /// provides a good balance between responsiveness and smoothing.
-    /// 
+    ///
     /// # Arguments
     /// * `rtt` - The new round-trip time measurement to incorporate
-    /// 
+    ///
     /// # Algorithm
     /// The exponential moving average is calculated as:
     /// `new_avg = old_avg * (1 - α) + new_sample * α`
@@ -61,11 +61,11 @@ impl RttStats {
 
 impl Default for RttStats {
     /// Creates a new RttStats instance with default values.
-    /// 
+    ///
     /// The default instance has no current RTT, zero average RTT,
     /// maximum possible minimum RTT (so any real measurement will be smaller),
     /// zero maximum RTT, and zero sample count.
-    /// 
+    ///
     /// # Returns
     /// A new RttStats instance ready to receive measurements
     fn default() -> Self {

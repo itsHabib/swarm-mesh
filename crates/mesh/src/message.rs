@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use snow::HandshakeState;
 
 /// Payload for Hello messages used in peer discovery.
-/// 
+///
 /// Hello messages are broadcast on multicast to announce a node's presence
 /// and allow other nodes to discover it. Contains essential information
 /// needed for establishing unicast communication.
@@ -16,7 +16,7 @@ pub struct HelloPayload {
 }
 
 /// Payload for Noise protocol handshake messages.
-/// 
+///
 /// Contains the cryptographic handshake data needed to establish
 /// a secure, authenticated connection between two nodes using the
 /// Noise protocol framework.
@@ -31,7 +31,7 @@ pub struct HandshakePayload {
 }
 
 /// All possible message types in the mesh network protocol.
-/// 
+///
 /// This enum defines the complete set of messages that can be exchanged
 /// between nodes in the mesh network. Each message type serves a specific
 /// purpose in the network protocol.
@@ -50,7 +50,7 @@ pub enum Message {
 }
 
 /// Payload for ping and pong messages used in connection monitoring.
-/// 
+///
 /// Ping/pong messages serve dual purposes: they verify that connections
 /// are still alive and measure round-trip time (RTT) for network
 /// performance monitoring.

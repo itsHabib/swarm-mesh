@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use node::{Connection, Node, State};
+use node::{Connection, Node, State,Metrics};
 use noise;
 use snow::Builder;
 use socket2::{Domain, Protocol, Socket, Type};
@@ -10,13 +10,32 @@ use tokio::{net::UdpSocket, sync::Mutex};
 use tracing::info;
 use tracing_log::LogTracer;
 use tracing_subscriber::{EnvFilter, fmt};
+use clap::Parser;
+
+/// Command line arguments for the node application.
+///
+/// This struct defines the available command line options that can be passed
+/// to the mesh node when starting up. Currently only supports configuring
+/// the metrics server port to avoid conflicts when running multiple nodes.
+#[derive(Parser)]
+#[command(name = "node")]
+#[command(about = "A mesh network node supporting Prometheus metrics")]
+struct Args {
+    /// Port for the Prometheus metrics HTTP server
+    ///
+    /// Each node needs a unique port for its metrics endpoint to avoid
+    /// binding conflicts when running multiple nodes on the same machine.
+    /// Prometheus will scrape metrics from http://localhost:<port>/metrics
+    #[arg(long, default_value = "8080")]
+    metrics_port: u16,
+}
 
 /// Pre-shared network key for mesh authentication.
-/// 
+///
 /// This 32-byte key is used by all nodes in the mesh network for authentication
 /// via the Noise protocol's PSK (Pre-Shared Key) mechanism. Only nodes with
 /// the correct key can establish secure connections with each other.
-/// 
+///
 /// # Security Note
 /// In a production deployment, this key should be:
 /// * Generated randomly and securely distributed
@@ -29,38 +48,41 @@ const NETWORK_KEY: [u8; 32] = [
 ];
 
 /// Multicast address for peer discovery.
-/// 
+///
 /// All nodes broadcast Hello messages to this multicast address to announce
 /// their presence. This is a standard IPv4 multicast address in the "All Systems"
 /// range that should be routable on most local networks.
 const MULTICAST_ADDR: &str = "224.0.0.1";
 
 /// UDP port for multicast communication.
-/// 
+///
 /// This port is used for both sending and receiving multicast Hello messages.
 /// All nodes in the mesh network must use the same port for discovery to work.
 const MULTICAST_PORT: u16 = 9999;
 
+
 /// Main application entry point.
-/// 
+///
 /// This function initializes and starts a mesh network node. It sets up logging,
 /// creates the node with all necessary networking components, and spawns the
 /// main networking tasks. The application runs until interrupted by Ctrl+C.
-/// 
+///
 /// # Architecture
 /// The application uses a multi-task architecture:
 /// * **Receiver Task**: Handles incoming messages from all peers
 /// * **Broadcast Task**: Periodically sends Hello messages for discovery
 /// * **Ping Task**: Monitors connection health with established peers
-/// 
+///
 /// # Returns
 /// Returns `Ok(())` on successful shutdown, or an error if initialization fails.
-/// 
+///
 /// # Errors
 /// * Node initialization failures (socket creation, key generation, etc.)
 /// * Signal handling setup failures
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args = Args::parse();
+
     init_logging();
     let node = init_node().await.context("Failed to initialize node")?;
 
@@ -73,9 +95,25 @@ async fn main() -> Result<()> {
     let multicast_addr: SocketAddr = format!("{}:{}", MULTICAST_ADDR, MULTICAST_PORT).parse()?;
     tokio::spawn(async move { broadcast_node.broadcast(multicast_addr).await });
 
-    // -- Ping Task ---
+    // --- Ping Task ---
     let ping_node = node.clone();
     tokio::spawn(async move { ping_node.ping_peers().await });
+
+    let metrics = Arc::new(Metrics::new()?);
+
+    // --- Metrics Server Task ---
+    tokio::spawn( {
+        let metrics_svr = metrics.clone();
+        async move {
+            if let Err(e) = Metrics::serve(metrics_svr, args.metrics_port).await {
+                tracing::error!("Metrics server failed: {}", e);
+            }
+        }
+    });
+
+    // --- Metrics Collection Task ---
+    let node_metrics= node.clone();
+    tokio::spawn(async move { node_metrics.collect_metrics(metrics).await });
 
     tokio::signal::ctrl_c().await?;
 
@@ -83,23 +121,23 @@ async fn main() -> Result<()> {
 }
 
 /// Initializes and configures a new mesh node.
-/// 
+///
 /// This function performs all the necessary setup to create a fully functional
 /// mesh node, including:
 /// * Generating a unique node ID and cryptographic keys
 /// * Setting up multicast and unicast UDP sockets
 /// * Initializing state databases for peer and session management
 /// * Creating the node with all components properly configured
-/// 
+///
 /// # Returns
 /// An Arc-wrapped Node instance ready for networking operations.
-/// 
+///
 /// # Errors
 /// * Random number generation failures
 /// * Noise protocol initialization errors
 /// * Socket creation or configuration failures
 /// * Network binding errors
-/// 
+///
 /// # Network Configuration
 /// * Multicast socket joins the discovery group and listens on the standard port
 /// * Unicast socket binds to an ephemeral port for peer-to-peer communication
@@ -154,20 +192,20 @@ async fn init_node() -> Result<Arc<Node>> {
 }
 
 /// Creates and configures a UDP socket for multicast communication.
-/// 
+///
 /// This function sets up a UDP socket with the necessary options for reliable
 /// multicast communication in the mesh network. It configures socket reuse,
 /// joins the multicast group, and sets up non-blocking operation.
-/// 
+///
 /// # Returns
 /// A configured UdpSocket ready for multicast operations.
-/// 
+///
 /// # Errors
 /// * Socket creation failures
 /// * Socket option configuration errors
 /// * Multicast group join failures
 /// * Address binding errors
-/// 
+///
 /// # Socket Configuration
 /// * **SO_REUSEADDR**: Allows multiple processes to bind to the same address
 /// * **SO_REUSEPORT**: Enables load balancing across multiple sockets
@@ -192,20 +230,20 @@ async fn create_multicast_socket() -> Result<UdpSocket> {
 }
 
 /// Initializes the logging subsystem for the application.
-/// 
+///
 /// This function sets up structured logging using the tracing ecosystem,
 /// configured for JSON output with detailed span information. The logging
 /// level can be controlled via the RUST_LOG environment variable.
-/// 
+///
 /// # Configuration
 /// * **Format**: JSON for machine-readable logs
 /// * **Spans**: Includes current span context in log entries
 /// * **Events**: Logs span close events for timing information
 /// * **Filter**: Respects RUST_LOG environment variable
-/// 
+///
 /// # Panics
 /// Panics if the logging system cannot be initialized (e.g., if already initialized).
-/// 
+///
 /// # Usage
 /// Set RUST_LOG environment variable to control logging:
 /// * `RUST_LOG=debug` - Verbose debugging information

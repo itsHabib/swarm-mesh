@@ -5,10 +5,12 @@ edition = "2024"
 
 [dependencies]
 anyhow = { workspace = true }
+axum = { workspace = true }
 bincode = { workspace = true }
 futures = { workspace = true }
 mesh = { path = "../mesh" }
 noise = { path = "../noise" }
+prometheus = { workspace = true }
 snow = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
