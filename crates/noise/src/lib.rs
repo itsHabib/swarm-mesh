@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use snow::{Builder, HandshakeState, TransportState, params::NoiseParams};
+use snow::{Builder, HandshakeState, params::NoiseParams};
 
 /// Initiates a Noise protocol handshake as the initiator.
 ///

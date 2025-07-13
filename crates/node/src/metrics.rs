@@ -1,11 +1,8 @@
 use anyhow::Result;
-use axum::body::Body;
-use axum::{Router, extract::State, http::StatusCode, response::Response, routing::get};
+use axum::{Router, extract::State, http::StatusCode, routing::get};
 use mesh::NodeId;
-use prometheus::{Encoder, Gauge, GaugeVec, Registry, TextEncoder};
-use std::collections::HashMap;
+use prometheus::{Encoder, GaugeVec, Registry, TextEncoder};
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 /// Metrics collector for mesh node statistics.

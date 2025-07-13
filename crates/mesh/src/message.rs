@@ -1,6 +1,5 @@
 use crate::NodeId;
 use serde::{Deserialize, Serialize};
-use snow::HandshakeState;
 
 /// Payload for Hello messages used in peer discovery.
 ///

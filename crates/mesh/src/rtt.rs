@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Round-trip time (RTT) statistics for network performance monitoring.
 ///

@@ -13,7 +13,7 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::time;
 use tokio::{net::UdpSocket, sync::Mutex};
-use tracing::{debug, info, error};
+use tracing::{debug, error, info};
 
 /// Command line arguments for the mesh node application.
 ///
@@ -79,21 +79,12 @@ const MULTICAST_PORT: u16 = 9999;
 /// * **Receiver Task**: Handles incoming messages from all peers
 /// * **Broadcast Task**: Periodically sends Hello messages for discovery
 /// * **Ping Task**: Monitors connection health with established peers
-///
-/// # Returns
-/// Returns `Ok(())` on successful shutdown, or an error if initialization fails.
-///
-/// # Errors
-/// * Node initialization failures (socket creation, key generation, etc.)
-/// * Signal handling setup failures
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
     log::init_logging();
 
-    let node = init_node()
-        .await
-        .context("Failed to initialize node")?;
+    let node = init_node().await.context("Failed to initialize node")?;
 
     // --- Receiver Task ---
     let recv_node = node.clone();
@@ -134,12 +125,7 @@ async fn main() -> Result<()> {
     let mesh_registry_endpoint = args.mesh_registry_endpoint.clone();
     let registration_metrics_port = registration_node.get_port();
     tokio::spawn(async move {
-        if let Err(e) = heartbeat_task(
-            registration_node,
-            mesh_registry_endpoint,
-        )
-        .await
-        {
+        if let Err(e) = heartbeat_task(registration_node, mesh_registry_endpoint).await {
             error!("Heartbeat task failed: {}", e);
         }
     });
@@ -155,10 +141,7 @@ async fn main() -> Result<()> {
 /// messages to the registry service to maintain the node's registration.
 /// It ensures that the node remains discoverable by Prometheus and visible
 /// in monitoring dashboards.
-async fn heartbeat_task(
-    node: Arc<Node>,
-    mesh_registry_endpoint: String,
-) -> Result<()> {
+async fn heartbeat_task(node: Arc<Node>, mesh_registry_endpoint: String) -> Result<()> {
     let client = reqwest::Client::new();
     let mut interval = time::interval(Duration::from_secs(10)); // Heartbeat every 30 seconds
 

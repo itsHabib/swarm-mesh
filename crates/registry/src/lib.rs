@@ -1,10 +1,7 @@
-use anyhow::{Context, Error, Result};
 use mesh::NodeId;
 use serde::Deserialize;
-use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
-use std::ops::{Sub, SubAssign};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::ops::Sub;
 
 /// A time-based registry for tracking active mesh nodes.
 ///
@@ -77,7 +74,7 @@ impl Registry {
     /// ```
     /// use std::time::Duration;
     /// use registry::Registry;
-    /// 
+    ///
     /// let registry = Registry::new(Duration::from_secs(300)); // 5 minute TTL
     /// ```
     pub fn new(ttl: std::time::Duration) -> Self {
@@ -97,7 +94,7 @@ impl Registry {
     /// ```
     /// use registry::{Registry, Node};
     /// use std::time::Duration;
-    /// 
+    ///
     /// let mut registry = Registry::new(Duration::from_secs(300));
     /// let node = Node {
     ///     id: 12345,
@@ -123,7 +120,7 @@ impl Registry {
     /// ```
     /// use registry::{Registry, Node};
     /// use std::time::Duration;
-    /// 
+    ///
     /// let mut registry = Registry::new(Duration::from_secs(300));
     /// // ... add some nodes ...
     /// let active_nodes = registry.nodes();
@@ -161,7 +158,7 @@ impl Registry {
     /// ```
     /// use registry::{Registry, Node};
     /// use std::time::Duration;
-    /// 
+    ///
     /// let mut registry = Registry::new(Duration::from_secs(300));
     /// // ... add some nodes and wait ...
     /// registry.purge(); // Remove expired entries

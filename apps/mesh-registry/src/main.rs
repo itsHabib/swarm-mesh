@@ -8,11 +8,11 @@ use clap::Parser;
 use registry::{Node, Registry};
 use serde::{Deserialize, Serialize};
 use serde_json;
+use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::os::macos::raw::mode_t;
 use std::sync::Arc;
 use std::time::Duration;
-use serde_json::json;
 use tokio::{net::TcpListener, sync::Mutex};
 use tracing::{debug, error, info};
 
@@ -201,9 +201,6 @@ pub struct App {
 /// - Node registry with 1-minute TTL
 /// - Background cleanup task for stale nodes
 /// - Web server on port 5000
-///
-/// # Returns
-/// Returns `Ok(())` on successful startup, or an error if initialization fails.
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -343,7 +340,7 @@ async fn graph_handler(State(app): State<App>) -> Result<Json<GraphData>, Status
         }
     };
 
-    Ok(Json(GraphData{ nodes, edges }))
+    Ok(Json(GraphData { nodes, edges }))
 }
 
 async fn prometheus_targets_handler(
@@ -357,7 +354,11 @@ async fn prometheus_targets_handler(
         let node_id_str = node_entry.node.id.to_string();
 
         targets.push(PrometheusTarget {
-            targets: vec![format!("{}:{}", node_entry.node.ip.clone(), node_entry.node.metrics_port)],
+            targets: vec![format!(
+                "{}:{}",
+                node_entry.node.ip.clone(),
+                node_entry.node.metrics_port
+            )],
             labels: PrometheusLabels {
                 job: "mesh-node".to_string(),
                 node_id: node_id_str,
