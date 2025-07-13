@@ -1,12 +1,12 @@
 use anyhow::Result;
+use axum::body::Body;
+use axum::{Router, extract::State, http::StatusCode, response::Response, routing::get};
 use mesh::NodeId;
 use prometheus::{Encoder, Gauge, GaugeVec, Registry, TextEncoder};
 use std::collections::HashMap;
-use tokio::net::TcpListener;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use axum::{extract::State, http::StatusCode, response::Response, routing::get, Router};
-use axum::body::Body;
 use std::sync::Arc;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 
 /// Metrics collector for mesh node statistics.
 ///
@@ -15,18 +15,17 @@ use std::sync::Arc;
 pub struct Metrics {
     /// Registry for all Prometheus metrics
     registry: Registry,
-    /// Per-peer RTT measurements in seconds
+    /// Per-peer RTT measurements in milliseconds
     peer_rtt_current: GaugeVec,
-    /// Per-peer minimum RTT in seconds
+    /// Per-peer minimum RTT in milliseconds
     peer_rtt_min: GaugeVec,
-    /// Per-peer maximum RTT in seconds  
+    /// Per-peer maximum RTT in milliseconds  
     peer_rtt_max: GaugeVec,
-    /// Per-peer average RTT in seconds
+    /// Per-peer average RTT in milliseconds
     peer_rtt_avg: GaugeVec,
     /// Total number of connected peers for this node
     connected_peers_total: GaugeVec,
 }
-
 
 impl Metrics {
     /// Creates a new Metrics instance with all metric definitions.
@@ -35,32 +34,32 @@ impl Metrics {
 
         let peer_rtt_current = GaugeVec::new(
             prometheus::Opts::new(
-                "mesh_peer_rtt_current_seconds",
-                "Current RTT to peer in seconds",
+                "mesh_peer_rtt_current_milliseconds",
+                "Current RTT to peer in milliseconds",
             ),
             &["local_node_id", "remote_node_id", "local_ip", "remote_ip"],
         )?;
 
         let peer_rtt_min = GaugeVec::new(
             prometheus::Opts::new(
-                "mesh_peer_rtt_min_seconds",
-                "Minimum RTT to peer in seconds",
+                "mesh_peer_rtt_min_milliseconds",
+                "Minimum RTT to peer in milliseconds",
             ),
             &["local_node_id", "remote_node_id", "local_ip", "remote_ip"],
         )?;
 
         let peer_rtt_max = GaugeVec::new(
             prometheus::Opts::new(
-                "mesh_peer_rtt_max_seconds",
-                "Maximum RTT to peer in seconds",
+                "mesh_peer_rtt_max_milliseconds",
+                "Maximum RTT to peer in milliseconds",
             ),
             &["local_node_id", "remote_node_id", "local_ip", "remote_ip"],
         )?;
 
         let peer_rtt_avg = GaugeVec::new(
             prometheus::Opts::new(
-                "mesh_peer_rtt_avg_seconds",
-                "Average RTT to peer in seconds",
+                "mesh_peer_rtt_avg_milliseconds",
+                "Average RTT to peer in milliseconds",
             ),
             &["local_node_id", "remote_node_id", "local_ip", "remote_ip"],
         )?;
@@ -70,7 +69,7 @@ impl Metrics {
                 "mesh_connected_peers_total",
                 "Total number of connected peers for this node",
             ),
-            &["node_id", "node_ip"],
+            &["node_id", "node_ip", "node_metric_port"],
         )?;
 
         // Register all metrics
@@ -110,25 +109,31 @@ impl Metrics {
         if let Some(current_rtt) = rtt_stats.current_rtt {
             self.peer_rtt_current
                 .with_label_values(labels)
-                .set(current_rtt.as_secs_f64());
+                .set(current_rtt.as_secs_f64() * 1000.0);
         }
 
         self.peer_rtt_min
             .with_label_values(labels)
-            .set(rtt_stats.min_rtt.as_secs_f64());
+            .set(rtt_stats.min_rtt.as_secs_f64() * 1000.0);
 
         self.peer_rtt_max
             .with_label_values(labels)
-            .set(rtt_stats.max_rtt.as_secs_f64());
+            .set(rtt_stats.max_rtt.as_secs_f64() * 1000.0);
 
         self.peer_rtt_avg
             .with_label_values(labels)
-            .set(rtt_stats.avg_rtt.as_secs_f64());
+            .set(rtt_stats.avg_rtt.as_secs_f64() * 1000.0);
     }
 
     /// Updates the total connected peers count.
-    pub fn update_connected_peers_count(&self, count: usize, node_ip: &str, node_id: NodeId) {
-        let labels = &[&node_id.to_string(), node_ip];
+    pub fn update_connected_peers_count(
+        &self,
+        count: usize,
+        node_ip: &str,
+        node_id: NodeId,
+        metrics_port: u16,
+    ) {
+        let labels = &[&node_id.to_string(), node_ip, &metrics_port.to_string()];
         self.connected_peers_total
             .with_label_values(labels)
             .set(count as f64);
@@ -142,21 +147,26 @@ impl Metrics {
         encoder.encode(&metric_families, &mut buffer)?;
         Ok(String::from_utf8(buffer)?)
     }
+}
 
-    /// Starts a simple HTTP server to expose metrics on the /metrics endpoint.
-    pub async fn serve(metrics: Arc<Metrics>, port: u16) -> Result<()> {
-        let app = Router::new()
-            .route("/metrics", get(metrics_handler))
-            .with_state(metrics);
+/// Starts a simple HTTP server to expose metrics on the /metrics endpoint.
+pub async fn serve(metrics: Arc<Metrics>, port: u16) -> Result<()> {
+    let app = Router::new()
+        .route("/metrics", get(metrics_handler))
+        .with_state(metrics);
 
-        let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
-        tracing::info!("Metrics server listening on http://0.0.0.0:{}/metrics", port);
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
+    tracing::info!(
+        "Metrics server listening on http://0.0.0.0:{}/metrics",
+        port
+    );
 
-        axum::serve(listener, app).await?;
-        Ok(())
-    }
+    axum::serve(listener, app).await?;
+    Ok(())
 }
 
 async fn metrics_handler(State(metrics): State<Arc<Metrics>>) -> Result<String, StatusCode> {
-    metrics.render().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+    metrics
+        .render()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }

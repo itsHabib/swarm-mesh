@@ -113,10 +113,10 @@ Each node runs a built-in HTTP server that exposes Prometheus-compatible metrics
 
 ### Available Metrics
 
-- `mesh_peer_rtt_current_seconds`: Current RTT to each peer
-- `mesh_peer_rtt_min_seconds`: Minimum RTT observed to each peer
-- `mesh_peer_rtt_max_seconds`: Maximum RTT observed to each peer  
-- `mesh_peer_rtt_avg_seconds`: Average RTT to each peer
+- `mesh_peer_rtt_current_milliseconds`: Current RTT to each peer
+- `mesh_peer_rtt_min_milliseconds`: Minimum RTT observed to each peer
+- `mesh_peer_rtt_max_milliseconds`: Maximum RTT observed to each peer  
+- `mesh_peer_rtt_avg_milliseconds`: Average RTT to each peer
 - `mesh_connected_peers_total`: Total number of connected peers per node
 
 All RTT metrics include labels: `local_node_id`, `remote_node_id`, `local_ip`, `remote_ip`
@@ -147,22 +147,19 @@ The setup includes:
   - Interactive node graph showing mesh topology
   - Network health summary
 
-### Adding More Nodes
+### Dynamic Node Discovery
 
-To monitor additional nodes, edit `docker/prometheus/prometheus.yml` and add new targets:
+The monitoring setup uses **automatic service discovery** via the mesh-registry service. Start it before running the monitoring stack:
 
-```yaml
-- targets: 
-    - 'host.docker.internal:8080'  # Node 1
-    - 'host.docker.internal:8081'  # Node 2
-    - 'host.docker.internal:8082'  # Node 3
-    - 'host.docker.internal:8083'  # Node 4 (new)
-```
-
-Then reload Prometheus:
 ```bash
-curl -X POST localhost:9090/-/reload
+# Start mesh-registry for dynamic node discovery
+cargo run --bin mesh-registry
+
+# Start monitoring stack
+cd docker && docker-compose up -d
 ```
+
+**No manual configuration required!** Prometheus automatically discovers active nodes by querying the mesh-registry service. New nodes are automatically added to monitoring when they join the mesh.
 
 ## Logging
 

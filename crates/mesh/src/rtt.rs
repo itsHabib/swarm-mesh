@@ -53,9 +53,9 @@ impl RttStats {
 
         // update average RTT using a simple exponential moving average
         const ALPHA: f64 = 0.125;
-        let old = self.avg_rtt.as_millis() as f64;
-        let new = rtt.as_millis() as f64;
-        self.avg_rtt = Duration::from_millis((old * (1.0 - ALPHA) + new * ALPHA) as u64);
+        let old = self.avg_rtt.as_secs_f64();
+        let new = rtt.as_secs_f64();
+        self.avg_rtt = Duration::from_secs_f64(old * (1.0 - ALPHA) + new * ALPHA);
     }
 }
 

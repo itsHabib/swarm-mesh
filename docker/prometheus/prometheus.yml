@@ -12,12 +12,11 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
 
-  # Swarm Mesh Nodes
-  - job_name: 'swarm-mesh-nodes'
-    static_configs:
-      - targets: 
-          - 'host.docker.internal:8080'  # Node 1
-          # Add more nodes as needed
+  # Swarm Mesh Nodes - Dynamic service discovery via mesh-registry
+  - job_name: 'mesh-node'
+    http_sd_configs:
+      - url: 'http://host.docker.internal:5000/prometheus/targets'
+        refresh_interval: 10s
     scrape_interval: 15s
     metrics_path: /metrics
-    scheme: http 
+    scheme: http

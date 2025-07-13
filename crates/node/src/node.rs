@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
 use tokio::time;
-use tracing::{error, debug, info};
+use tracing::{debug, error, info};
 
 /// Interval between Hello message broadcasts in milliseconds.
 ///
@@ -66,6 +66,10 @@ pub struct Node {
     connection: Connection,
     /// Shared state databases for peers, sessions, and ping tracking
     state: State,
+    /// Port where this node's metrics server is listening
+    metrics_port: u16,
+    /// IP of the node
+    ip: String,
 }
 
 impl Node {
@@ -94,6 +98,8 @@ impl Node {
         static_keys: snow::Keypair,
         connection: Connection,
         state: State,
+        ip: String,
+        metrics_port: u16,
     ) -> Self {
         Node {
             id,
@@ -101,6 +107,8 @@ impl Node {
             static_keys,
             connection,
             state,
+            ip,
+            metrics_port,
         }
     }
 
@@ -923,6 +931,70 @@ impl Node {
         ping_db.retain(|_, ping| now.duration_since(*ping) > timeout);
     }
 
+    /// Periodic stale peer cleanup loop.
+    ///
+    /// This method runs an infinite loop that removes peer connections that haven't
+    /// been heard from in a specified timeout period. It removes both the peer
+    /// information and any associated session state to prevent resource leaks.
+    ///
+    /// # Cleanup Schedule
+    /// * **Initial Delay**: Waits 30 seconds before first cleanup
+    /// * **Interval**: Cleans up every 30 seconds
+    /// * **Timeout**: Removes peers not seen for 60 seconds
+    /// * **Persistence**: Continues cleaning for the lifetime of the node
+    ///
+    /// # Never Returns
+    /// This method runs indefinitely until the process is terminated. It's designed
+    /// to be spawned as a long-running async task.
+    pub async fn monitor_peers(&self) -> ! {
+        let mut interval = time::interval_at(
+            time::Instant::now() + Duration::from_secs(30),
+            Duration::from_secs(30),
+        );
+
+        loop {
+            interval.tick().await;
+            self.remove_stale_peers().await;
+        }
+    }
+
+    /// Removes stale peer connections from the link and session databases.
+    ///
+    /// This method performs cleanup of peer connections that haven't been heard
+    /// from in a specified timeout period. It removes both the peer information
+    /// and any associated session state to prevent resource leaks.
+    async fn remove_stale_peers(&self) {
+        let link_db = self.state.link_db.clone();
+        let session_db = self.state.session_db.clone();
+        let timeout = Duration::from_secs(60);
+        let now = Instant::now();
+
+        let mut stale_peers = Vec::new();
+
+        {
+            let link_db = link_db.lock().await;
+            for (peer_id, peer_info) in link_db.iter() {
+                if now.duration_since(peer_info.last_seen) > timeout {
+                    stale_peers.push(*peer_id);
+                }
+            }
+        }
+
+        if stale_peers.is_empty() {
+            return;
+        }
+
+        info!("Removing {} stale peers", stale_peers.len());
+
+        let mut link_db = link_db.lock().await;
+        let mut session_db = session_db.lock().await;
+
+        for peer_id in stale_peers {
+            link_db.remove(&peer_id);
+            session_db.remove(&peer_id);
+        }
+    }
+
     /// Sends a ping message to a specific peer.
     ///
     /// This method sends a ping message to a peer for connection health monitoring
@@ -1078,10 +1150,7 @@ impl Node {
     /// at regular intervals. It should be spawned as a separate async task.
     pub async fn collect_metrics(&self, metrics: Arc<Metrics>) -> ! {
         let dur = Duration::from_secs(5);
-        let mut interval = time::interval_at(
-            time::Instant::now() + dur,
-            dur,
-        );
+        let mut interval = time::interval_at(time::Instant::now() + dur, dur);
         info!("starting metrics collection task");
 
         loop {
@@ -1127,8 +1196,23 @@ impl Node {
             metrics.update_peer_rtt(self.id, *peer_id, &local_ip, &remote_ip, rtt_stats);
         }
 
-        metrics.update_connected_peers_count(connected_count, local_ip.as_str(), self.id);
+        metrics.update_connected_peers_count(
+            connected_count,
+            local_ip.as_str(),
+            self.id,
+            self.metrics_port,
+        );
 
         Ok(())
+    }
+
+    /// Returns the node's unique identifier.
+    pub fn get_id(&self) -> u32 {
+        self.id
+    }
+
+    /// Returns the node's local IP address.
+    pub fn get_local_ip(&self) -> String {
+        format!("{}:{}", self.ip.clone(), self.connection.unicast_port)
     }
 }

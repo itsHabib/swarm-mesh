@@ -1,50 +1,42 @@
 {
-  "id": null,
-  "title": "Swarm Mesh Network Dashboard",
-  "tags": ["swarm-mesh", "network", "p2p"],
-  "style": "dark",
-  "timezone": "browser",
-  "refresh": "5s",
-  "schemaVersion": 27,
-  "version": 1,
-  "time": {
-    "from": "now-5m",
-    "to": "now"
-  },
-  "timepicker": {},
-  "templating": {
-    "list": []
-  },
   "annotations": {
-    "list": []
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
   },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": 1,
+  "links": [],
   "panels": [
     {
-      "id": 1,
-      "title": "Connected Peers Total",
-      "type": "stat",
-      "targets": [
-        {
-          "expr": "mesh_connected_peers_total",
-          "legendFormat": "Node {{node_id}} ({{node_ip}})",
-          "refId": "A"
-        }
-      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
-          "custom": {
-            "displayMode": "list",
-            "orientation": "horizontal"
-          },
           "mappings": [],
           "thresholds": {
+            "mode": "absolute",
             "steps": [
               {
-                "color": "red",
-                "value": null
+                "color": "red"
               },
               {
                 "color": "yellow",
@@ -59,72 +51,98 @@
         },
         "overrides": []
       },
-      "options": {
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "orientation": "auto",
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto"
-      },
-      "pluginVersion": "8.0.0",
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
         "y": 0
-      }
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.0.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "mesh_connected_peers_total",
+          "legendFormat": "Node {{node_id}} ({{node_ip}})",
+          "refId": "A"
+        }
+      ],
+      "title": "Connected Peers Total",
+      "type": "stat"
     },
     {
-      "id": 2,
-      "title": "Network Topology",
-      "type": "text",
-      "targets": [],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
         "y": 0
       },
+      "id": 2,
       "options": {
-        "mode": "html",
-        "content": "<div style=\"text-align: center; padding: 20px;\">\n  <h3>Mesh Network Status</h3>\n  <p>Monitor your swarm-mesh network health and connectivity.</p>\n  <p><strong>Active Monitoring:</strong> RTT, Peer Connections, Network Health</p>\n</div>"
-      }
+        "code": {
+          "language": "plaintext",
+          "showLineNumbers": false,
+          "showMiniMap": false
+        },
+        "content": "<div style=\"text-align: center; padding: 20px;\">\n  <h3>Mesh Network Status</h3>\n  <p>Monitor your swarm-mesh network health and connectivity.</p>\n  <p><strong>Active Monitoring:</strong> RTT, Peer Connections, Network Health</p>\n</div>",
+        "mode": "html"
+      },
+      "pluginVersion": "12.0.2",
+      "title": "Network Topology",
+      "type": "text"
     },
     {
-      "id": 3,
-      "title": "Current RTT to Peers",
-      "type": "timeseries",
-      "targets": [
-        {
-          "expr": "mesh_peer_rtt_current_seconds * 1000",
-          "legendFormat": "{{local_node_id}} → {{remote_node_id}} ({{local_ip}} → {{remote_ip}})",
-          "refId": "A"
-        }
-      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 10,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
-              "vis": false
+              "vis": false,
+              "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 1,
             "pointSize": 5,
@@ -146,8 +164,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -159,186 +176,196 @@
         },
         "overrides": []
       },
-      "options": {
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        },
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        }
-      },
       "gridPos": {
         "h": 8,
         "w": 24,
         "x": 0,
         "y": 8
-      }
-    },
-    {
-      "id": 4,
-      "title": "RTT Statistics (Min/Max/Avg)",
-      "type": "timeseries",
-      "targets": [
-        {
-          "expr": "mesh_peer_rtt_min_seconds * 1000",
-          "legendFormat": "Min: {{local_node_id}} → {{remote_node_id}}",
-          "refId": "A"
-        },
-        {
-          "expr": "mesh_peer_rtt_max_seconds * 1000",
-          "legendFormat": "Max: {{local_node_id}} → {{remote_node_id}}",
-          "refId": "B"
-        },
-        {
-          "expr": "mesh_peer_rtt_avg_seconds * 1000",
-          "legendFormat": "Avg: {{local_node_id}} → {{remote_node_id}}",
-          "refId": "C"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "Min:.*"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "green"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "Max:.*"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "red"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": "Avg:.*"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "blue"
-                }
-              }
-            ]
-          }
-        ]
       },
+      "id": 3,
       "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
         "tooltip": {
+          "hideZeros": false,
           "mode": "single",
           "sort": "none"
-        },
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
         }
       },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 52
-      }
-    },
-    {
-      "id": 5,
-      "title": "Connected Peers Over Time",
-      "type": "timeseries",
+      "pluginVersion": "12.0.2",
       "targets": [
         {
-          "expr": "mesh_connected_peers_total",
-          "legendFormat": "Node {{node_id}} ({{node_ip}})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "expr": "mesh_peer_rtt_current_milliseconds",
+          "legendFormat": "{{local_node_id}} → {{remote_node_id}} ({{local_ip}} → {{remote_ip}})",
+          "range": true,
           "refId": "A"
         }
       ],
+      "title": "Current RTT to Peers",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "marcusolsson-json-datasource",
+        "uid": "mesh-registry"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "id": 8,
+      "options": {
+        "edges": {
+          "dataFrameRefId": "edges",
+          "mainStatUnit": "ms",
+          "secondaryStatUnit": "dtdurationms"
+        },
+        "layoutAlgorithm": "layered",
+        "nodes": {
+          "dataFrameRefId": "nodes",
+          "mainStatUnit": ""
+        },
+        "zoomMode": "cooperative"
+      },
+      "pluginVersion": "12.0.2",
+      "targets": [
+        {
+          "cacheDurationSeconds": 60,
+          "datasource": {
+            "type": "marcusolsson-json-datasource",
+            "uid": "mesh-registry"
+          },
+          "fields": [
+            {
+              "jsonPath": "$[*].id",
+              "language": "jsonpath"
+            },
+            {
+              "jsonPath": "$[*].color",
+              "language": "jsonpath",
+              "name": ""
+            },
+            {
+              "jsonPath": "$[*].detail",
+              "language": "jsonpath",
+              "name": ""
+            },
+            {
+              "jsonPath": "$[*].mainStat",
+              "language": "jsonpath",
+              "name": ""
+            },
+            {
+              "jsonPath": "$[*].title",
+              "language": "jsonpath",
+              "name": ""
+            },
+            {
+              "jsonPath": "$[*].subtitle",
+              "language": "jsonpath",
+              "name": ""
+            },
+            {
+              "jsonPath": "$[*].secondaryStat",
+              "language": "jsonpath",
+              "name": ""
+            }
+          ],
+          "method": "GET",
+          "queryParams": "",
+          "refId": "nodes",
+          "target": "graph/nodes",
+          "urlPath": "/graph/nodes"
+        },
+        {
+          "cacheDurationSeconds": 300,
+          "datasource": {
+            "type": "marcusolsson-json-datasource",
+            "uid": "mesh-registry"
+          },
+          "fields": [
+            {
+              "jsonPath": "$[*].id"
+            },
+            {
+              "jsonPath": "$[*].source",
+              "language": "jsonpath",
+              "name": ""
+            },
+            {
+              "jsonPath": "$[*].target",
+              "language": "jsonpath",
+              "name": ""
+            },
+            {
+              "jsonPath": "$[*].detail",
+              "language": "jsonpath",
+              "name": ""
+            },
+            {
+              "jsonPath": "$[*].mainStat",
+              "language": "jsonpath",
+              "name": ""
+            },
+            {
+              "jsonPath": "$[*].secondaryStat",
+              "language": "jsonpath",
+              "name": ""
+            }
+          ],
+          "hide": false,
+          "method": "GET",
+          "queryParams": "",
+          "refId": "edges",
+          "urlPath": "/graph/edges"
+        }
+      ],
+      "title": "Mesh Network Graph",
+      "type": "nodeGraph"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 10,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
-              "vis": false
+              "vis": false,
+              "viz": false
             },
+            "insertNulls": false,
             "lineInterpolation": "linear",
             "lineWidth": 2,
             "pointSize": 5,
@@ -360,8 +387,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -373,44 +399,46 @@
         },
         "overrides": []
       },
-      "options": {
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        },
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        }
-      },
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 44
-      }
-    },
-    {
-      "id": 6,
-      "title": "Network Health Summary",
-      "type": "stat",
+        "y": 28
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.0.2",
       "targets": [
         {
-          "expr": "count(mesh_connected_peers_total)",
-          "legendFormat": "Active Nodes",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "mesh_connected_peers_total",
+          "legendFormat": "Node {{node_id}} ({{node_ip}})",
           "refId": "A"
-        },
-        {
-          "expr": "sum(mesh_connected_peers_total)",
-          "legendFormat": "Total Connections",
-          "refId": "B"
-        },
-        {
-          "expr": "avg(mesh_peer_rtt_current_seconds * 1000)",
-          "legendFormat": "Avg RTT (ms)",
-          "refId": "C"
         }
       ],
+      "title": "Connected Peers Over Time",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -418,10 +446,10 @@
           },
           "mappings": [],
           "thresholds": {
+            "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -445,115 +473,242 @@
           }
         ]
       },
-      "options": {
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "orientation": "auto",
-        "textMode": "auto",
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto"
-      },
-      "pluginVersion": "8.0.0",
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 44
-      }
-    },
-    {
-      "id": 8,
-      "title": "Mesh Network Graph",
-      "type": "nodeGraph",
+        "y": 28
+      },
+      "id": 6,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.0.2",
       "targets": [
         {
-          "expr": "mesh_connected_peers_total",
-          "refId": "nodes",
-          "format": "table",
-          "instant": true,
-          "legendFormat": ""
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "count(mesh_connected_peers_total)",
+          "legendFormat": "Active Nodes",
+          "refId": "A"
         },
         {
-          "expr": "label_join(mesh_peer_rtt_current_seconds * 1000, \"id\", \"->\", \"local_node_id\", \"remote_node_id\")",
-          "refId": "edges",
-          "format": "table",
-          "instant": true,
-          "legendFormat": ""
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "sum(mesh_connected_peers_total)",
+          "legendFormat": "Total Connections",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "avg(mesh_peer_rtt_current_seconds * 1000)",
+          "legendFormat": "Avg RTT (ms)",
+          "refId": "C"
         }
       ],
+      "title": "Network Health Summary",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
       "fieldConfig": {
         "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
-              "vis": false
+              "vis": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
             }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Min:.*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Max:.*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "Avg:.*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
           }
-        },
-        "overrides": []
+        ]
       },
-      "options": {
-        "nodes": {
-          "mainStatUnit": "short"
-        },
-        "edges": {
-          "mainStatUnit": "ms"
-        }
-      },
-      "pluginVersion": "8.0.0",
       "gridPos": {
-        "h": 12,
+        "h": 8,
         "w": 24,
         "x": 0,
-        "y": 16
+        "y": 36
       },
-      "transformations": [
-        {
-          "id": "filterByRefId",
-          "options": {
-            "include": "nodes"
-          }
+      "id": 4,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
         },
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {},
-            "indexByName": {},
-            "renameByName": {
-              "node_id": "id",
-              "node_ip": "title",
-              "Value": "mainstat"
-            }
-          }
-        },
-        {
-          "id": "filterByRefId",
-          "options": {
-            "include": "edges"
-          }
-        },
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {},
-            "indexByName": {},
-            "renameByName": {
-              "local_node_id": "source",
-              "remote_node_id": "target",
-              "local_ip": "detail__source_ip",
-              "remote_ip": "detail__target_ip",
-              "Value": "mainstat"
-            }
-          }
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
         }
-      ]
+      },
+      "pluginVersion": "12.0.2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "mesh_peer_rtt_min_seconds * 1000",
+          "legendFormat": "Min: {{local_node_id}} → {{remote_node_id}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "mesh_peer_rtt_max_seconds * 1000",
+          "legendFormat": "Max: {{local_node_id}} → {{remote_node_id}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "expr": "mesh_peer_rtt_avg_seconds * 1000",
+          "legendFormat": "Avg: {{local_node_id}} → {{remote_node_id}}",
+          "refId": "C"
+        }
+      ],
+      "title": "RTT Statistics (Min/Max/Avg)",
+      "type": "timeseries"
     }
-  ]
-} 
+  ],
+  "preload": false,
+  "refresh": "10s",
+  "schemaVersion": 41,
+  "tags": [
+    "swarm-mesh",
+    "network",
+    "p2p"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-5m",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Swarm Mesh Network Dashboard",
+  "uid": "159f33c0-5a8a-4a52-87c5-5a91f5b6d53e",
+  "version": 55
+}

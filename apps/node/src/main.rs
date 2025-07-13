@@ -1,32 +1,38 @@
 use anyhow::{Context, Result};
-use node::{Connection, Node, State,Metrics};
+use axum::{Router, extract::State as AxumState, http::StatusCode, routing::get};
+use clap::Parser;
+use node::{Connection, Metrics, Node, State};
 use noise;
+use serde::{Deserialize, Serialize};
 use snow::Builder;
 use socket2::{Domain, Protocol, Socket, Type};
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::net::TcpListener;
+use tokio::time;
 use tokio::{net::UdpSocket, sync::Mutex};
-use tracing::info;
-use tracing_log::LogTracer;
-use tracing_subscriber::{EnvFilter, fmt};
-use clap::Parser;
+use tracing::{error, info};
 
-/// Command line arguments for the node application.
-///
-/// This struct defines the available command line options that can be passed
-/// to the mesh node when starting up. Currently only supports configuring
-/// the metrics server port to avoid conflicts when running multiple nodes.
-#[derive(Parser)]
-#[command(name = "node")]
-#[command(about = "A mesh network node supporting Prometheus metrics")]
+/// Command line arguments for the mesh node application.
+#[derive(Parser, Debug)]
+#[command(name = "mesh-node")]
+#[command(about = "A mesh network node")]
 struct Args {
-    /// Port for the Prometheus metrics HTTP server
-    ///
-    /// Each node needs a unique port for its metrics endpoint to avoid
-    /// binding conflicts when running multiple nodes on the same machine.
-    /// Prometheus will scrape metrics from http://localhost:<port>/metrics
+    /// Port for the Prometheus metrics server
     #[arg(long, default_value = "8080")]
+    metrics_port: u16,
+
+    /// Mesh-registry service endpoint for registration
+    #[arg(long, default_value = "http://localhost:5000")]
+    mesh_registry_endpoint: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct NodeRegistration {
+    id: String,
+    ip: String,
     metrics_port: u16,
 }
 
@@ -37,11 +43,7 @@ struct Args {
 /// the correct key can establish secure connections with each other.
 ///
 /// # Security Note
-/// In a production deployment, this key should be:
-/// * Generated randomly and securely distributed
-/// * Stored securely (e.g., in a key management system)
-/// * Rotated periodically for enhanced security
-/// * Never hardcoded in source code
+/// * This is hardcoded just for demonstration purposes.
 const NETWORK_KEY: [u8; 32] = [
     0x67, 0xa5, 0x0f, 0x77, 0xa3, 0x51, 0x73, 0xdc, 0xc2, 0xa1, 0x29, 0xf1, 0xd8, 0xb8, 0x52, 0xa5,
     0x35, 0x01, 0x82, 0x09, 0xa0, 0xda, 0x35, 0x7c, 0xe3, 0xf4, 0x75, 0x0e, 0x53, 0x8d, 0xb6, 0x2a,
@@ -59,7 +61,6 @@ const MULTICAST_ADDR: &str = "224.0.0.1";
 /// This port is used for both sending and receiving multicast Hello messages.
 /// All nodes in the mesh network must use the same port for discovery to work.
 const MULTICAST_PORT: u16 = 9999;
-
 
 /// Main application entry point.
 ///
@@ -82,9 +83,11 @@ const MULTICAST_PORT: u16 = 9999;
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    log::init_logging();
 
-    init_logging();
-    let node = init_node().await.context("Failed to initialize node")?;
+    let node = init_node(args.metrics_port)
+        .await
+        .context("Failed to initialize node")?;
 
     // --- Receiver Task ---
     let recv_node = node.clone();
@@ -99,31 +102,86 @@ async fn main() -> Result<()> {
     let ping_node = node.clone();
     tokio::spawn(async move { ping_node.ping_peers().await });
 
+    // --- Peer Health Monitor Task ---
+    let health_node = node.clone();
+    tokio::spawn(async move { health_node.monitor_peers().await });
+
     let metrics = Arc::new(Metrics::new()?);
 
     // --- Metrics Server Task ---
-    tokio::spawn( {
+    tokio::spawn({
         let metrics_svr = metrics.clone();
         async move {
-            if let Err(e) = Metrics::serve(metrics_svr, args.metrics_port).await {
+            if let Err(e) = serve_metrics(metrics_svr, args.metrics_port).await {
                 tracing::error!("Metrics server failed: {}", e);
             }
         }
     });
 
     // --- Metrics Collection Task ---
-    let node_metrics= node.clone();
+    let node_metrics = node.clone();
     tokio::spawn(async move { node_metrics.collect_metrics(metrics).await });
+
+    // --- Mesh-Registry Registration Task ---
+    let registration_node = node.clone();
+    let mesh_registry_endpoint = args.mesh_registry_endpoint.clone();
+    let registration_metrics_port = args.metrics_port;
+    tokio::spawn(async move {
+        if let Err(e) = heartbeat_task(
+            registration_node,
+            mesh_registry_endpoint,
+            registration_metrics_port,
+        )
+        .await
+        {
+            error!("Heartbeat task failed: {}", e);
+        }
+    });
 
     tokio::signal::ctrl_c().await?;
 
     Ok(())
 }
 
+async fn heartbeat_task(
+    node: Arc<Node>,
+    mesh_registry_endpoint: String,
+    metrics_port: u16,
+) -> Result<()> {
+    let client = reqwest::Client::new();
+    let mut interval = time::interval(Duration::from_secs(10)); // Heartbeat every 30 seconds
+
+    loop {
+        interval.tick().await;
+
+        let registration = NodeRegistration {
+            id: node.get_id().to_string(),
+            ip: node.get_local_ip(),
+            metrics_port,
+        };
+
+        // Try to send heartbeat, fallback to registration if needed
+        let url = format!("{}/heartbeat", mesh_registry_endpoint);
+        info!("Sending heartbeat to mesh-registry at {}", url);
+        match client.post(&url).json(&registration).send().await {
+            Ok(response) => {
+                if response.status().is_success() {
+                    info!("Heartbeat sent to mesh-registry");
+                } else {
+                    error!("Heartbeat failed: {}", response.status());
+                }
+            }
+            Err(e) => {
+                error!("Failed to send heartbeat: {}", e);
+            }
+        }
+    }
+}
+
 /// Initializes and configures a new mesh node.
 ///
 /// This function performs all the necessary setup to create a fully functional
-/// mesh node, including:
+/// mesh node, including
 /// * Generating a unique node ID and cryptographic keys
 /// * Setting up multicast and unicast UDP sockets
 /// * Initializing state databases for peer and session management
@@ -132,17 +190,11 @@ async fn main() -> Result<()> {
 /// # Returns
 /// An Arc-wrapped Node instance ready for networking operations.
 ///
-/// # Errors
-/// * Random number generation failures
-/// * Noise protocol initialization errors
-/// * Socket creation or configuration failures
-/// * Network binding errors
-///
 /// # Network Configuration
 /// * Multicast socket joins the discovery group and listens on the standard port
 /// * Unicast socket binds to an ephemeral port for peer-to-peer communication
 /// * Both sockets are configured for optimal performance and reliability
-async fn init_node() -> Result<Arc<Node>> {
+async fn init_node(metrics_port: u16) -> Result<Arc<Node>> {
     let node_id: mesh::NodeId = rand::random();
     info!(node_id = node_id, "Starting node with ID");
 
@@ -163,11 +215,16 @@ async fn init_node() -> Result<Arc<Node>> {
         "Listening for mesh traffic on multicast",
     );
     let unicast_socket = UdpSocket::bind("0.0.0.0:0").await?;
-    let unicast_port = unicast_socket.local_addr()?.port();
+    let local_addr = unicast_socket.local_addr()?;
+    let unicast_port = local_addr.port();
     info!(
         unicast_port = unicast_port,
         "Unicast listening on port: {}", unicast_port
     );
+
+    // Get the actual local IP address by connecting to a remote address
+    let local_ip = get_local_ip().await?;
+    info!(local_ip = local_ip, "Detected local IP address");
 
     let link_state_db: node::LinkStateDb = Arc::new(Mutex::new(HashMap::new()));
     let session_state_db: node::SessionDb = Arc::new(Mutex::new(HashMap::new()));
@@ -188,7 +245,17 @@ async fn init_node() -> Result<Arc<Node>> {
         static_keys,
         connection,
         state,
+        local_ip,
+        metrics_port,
     )))
+}
+
+async fn get_local_ip() -> Result<String> {
+    // Connect to a remote address to determine our local IP
+    let socket = UdpSocket::bind("0.0.0.0:0").await?;
+    socket.connect("8.8.8.8:80").await?;
+    let local_addr = socket.local_addr()?;
+    Ok(local_addr.ip().to_string())
 }
 
 /// Creates and configures a UDP socket for multicast communication.
@@ -199,12 +266,6 @@ async fn init_node() -> Result<Arc<Node>> {
 ///
 /// # Returns
 /// A configured UdpSocket ready for multicast operations.
-///
-/// # Errors
-/// * Socket creation failures
-/// * Socket option configuration errors
-/// * Multicast group join failures
-/// * Address binding errors
 ///
 /// # Socket Configuration
 /// * **SO_REUSEADDR**: Allows multiple processes to bind to the same address
@@ -229,36 +290,26 @@ async fn create_multicast_socket() -> Result<UdpSocket> {
     Ok(UdpSocket::from_std(socket.into())?)
 }
 
-/// Initializes the logging subsystem for the application.
-///
-/// This function sets up structured logging using the tracing ecosystem,
-/// configured for JSON output with detailed span information. The logging
-/// level can be controlled via the RUST_LOG environment variable.
-///
-/// # Configuration
-/// * **Format**: JSON for machine-readable logs
-/// * **Spans**: Includes current span context in log entries
-/// * **Events**: Logs span close events for timing information
-/// * **Filter**: Respects RUST_LOG environment variable
-///
-/// # Panics
-/// Panics if the logging system cannot be initialized (e.g., if already initialized).
-///
-/// # Usage
-/// Set RUST_LOG environment variable to control logging:
-/// * `RUST_LOG=debug` - Verbose debugging information
-/// * `RUST_LOG=info` - General information messages
-/// * `RUST_LOG=warn` - Warning messages only
-/// * `RUST_LOG=error` - Error messages only
-fn init_logging() {
-    LogTracer::init().expect("Failed to set logger");
+/// Starts a simple HTTP server to expose metrics on the /metrics endpoint.
+pub async fn serve_metrics(metrics: Arc<Metrics>, port: u16) -> Result<()> {
+    let app = Router::new()
+        .route("/metrics", get(metrics_handler))
+        .with_state(metrics);
 
-    let subscriber = fmt::Subscriber::builder()
-        .with_env_filter(EnvFilter::from_default_env())
-        .json()
-        .with_current_span(true)
-        .with_span_events(fmt::format::FmtSpan::CLOSE) // optional
-        .finish();
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
+    tracing::info!(
+        "Metrics server listening on http://0.0.0.0:{}/metrics",
+        port
+    );
 
-    tracing::subscriber::set_global_default(subscriber).expect("Failed to set global subscriber");
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+async fn metrics_handler(
+    AxumState(metrics): AxumState<Arc<Metrics>>,
+) -> Result<String, StatusCode> {
+    metrics
+        .render()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
