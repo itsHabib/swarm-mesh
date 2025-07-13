@@ -664,7 +664,7 @@
             "type": "prometheus",
             "uid": "PBFA97CFB590B2093"
           },
-          "expr": "mesh_peer_rtt_min_seconds * 1000",
+          "expr": "mesh_peer_rtt_min_milliseconds",
           "legendFormat": "Min: {{local_node_id}} → {{remote_node_id}}",
           "refId": "A"
         },
@@ -673,7 +673,7 @@
             "type": "prometheus",
             "uid": "PBFA97CFB590B2093"
           },
-          "expr": "mesh_peer_rtt_max_seconds * 1000",
+          "expr": "mesh_peer_rtt_max_milliseconds",
           "legendFormat": "Max: {{local_node_id}} → {{remote_node_id}}",
           "refId": "B"
         },
@@ -682,7 +682,7 @@
             "type": "prometheus",
             "uid": "PBFA97CFB590B2093"
           },
-          "expr": "mesh_peer_rtt_avg_seconds * 1000",
+          "expr": "mesh_peer_rtt_avg_milliseconds",
           "legendFormat": "Avg: {{local_node_id}} → {{remote_node_id}}",
           "refId": "C"
         }

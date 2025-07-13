@@ -14,9 +14,11 @@ and establish secure, authenticated connections. The system uses the Noise proto
 The project is organized into several crates:
 
 - **`apps/node`**: Main application binary that runs a mesh node
+- **`apps/mesh-registry`**: Registry service for node discovery and Grafana visualization
 - **`crates/mesh`**: Core mesh networking types and message definitions
 - **`crates/node`**: Node implementation with connection management and state handling
 - **`crates/noise`**: Noise protocol wrapper for secure handshakes
+- **`crates/registry`**: Node registry with TTL-based cleanup for service discovery
 
 ## Key Features
 
@@ -160,6 +162,21 @@ cd docker && docker-compose up -d
 ```
 
 **No manual configuration required!** Prometheus automatically discovers active nodes by querying the mesh-registry service. New nodes are automatically added to monitoring when they join the mesh.
+
+#### Mesh Registry Service
+
+The mesh-registry service (`apps/mesh-registry`) provides:
+- **Node Registration**: Nodes automatically register their metrics endpoints
+- **Service Discovery**: Prometheus target discovery via HTTP API
+- **Grafana Integration**: Real-time network graph visualization
+- **TTL Management**: Automatic cleanup of stale node registrations
+
+The service runs on port 5000 by default and provides these endpoints:
+- `GET /prometheus/targets` - Prometheus service discovery
+- `POST /register` - Node registration
+- `POST /heartbeat` - Node heartbeat/refresh
+- `GET /graph` - Graph data for Grafana node graph panels
+- `GET /` - Health check
 
 ## Logging
 

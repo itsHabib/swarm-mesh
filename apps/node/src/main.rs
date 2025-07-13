@@ -16,6 +16,9 @@ use tokio::{net::UdpSocket, sync::Mutex};
 use tracing::{debug, info, error};
 
 /// Command line arguments for the mesh node application.
+///
+/// This structure defines the command-line interface for the mesh node,
+/// allowing users to configure the node's behavior at startup.
 #[derive(Parser, Debug)]
 #[command(name = "mesh-node")]
 #[command(about = "A mesh network node")]
@@ -25,10 +28,17 @@ struct Args {
     mesh_registry_endpoint: String,
 }
 
+/// Node registration structure for registry service communication.
+///
+/// This structure is used to register the node with the mesh registry service,
+/// providing the essential information needed for service discovery and monitoring.
 #[derive(Serialize, Deserialize, Debug)]
 struct NodeRegistration {
+    /// String representation of the node's unique identifier
     id: String,
+    /// IP address where the node can be reached
     ip: String,
+    /// Port number where the node exposes Prometheus metrics
     metrics_port: u16,
 }
 
@@ -139,6 +149,12 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Background task to send periodic heartbeats to the mesh registry service.
+///
+/// This function runs in a background task and periodically sends heartbeat
+/// messages to the registry service to maintain the node's registration.
+/// It ensures that the node remains discoverable by Prometheus and visible
+/// in monitoring dashboards.
 async fn heartbeat_task(
     node: Arc<Node>,
     mesh_registry_endpoint: String,
@@ -243,6 +259,19 @@ async fn init_node() -> Result<Arc<Node>> {
     )))
 }
 
+/// Determines the local IP address of this machine.
+///
+/// This function uses a technique of connecting to a remote address (Google's DNS)
+/// to determine which local interface would be used for external communication.
+/// This gives us the IP address that other nodes should use to reach this node.
+///
+/// # Returns
+/// Returns the local IP address as a string, or an error if the address
+/// cannot be determined.
+///
+/// # Implementation Note
+/// This method doesn't actually send any data to the remote address; it just
+/// uses the OS routing table to determine the appropriate local interface.
 async fn get_local_ip() -> Result<String> {
     let socket = UdpSocket::bind("0.0.0.0:0").await?;
     socket.connect("8.8.8.8:80").await?;
@@ -283,6 +312,23 @@ async fn create_multicast_socket() -> Result<UdpSocket> {
 }
 
 /// Starts a simple HTTP server to expose metrics on the /metrics endpoint.
+/// Starts the Prometheus metrics HTTP server.
+///
+/// This function creates an HTTP server that exposes Prometheus metrics
+/// for monitoring the mesh node's performance and connectivity. The server
+/// provides a single endpoint at `/metrics` that returns metrics in the
+/// Prometheus text format.
+///
+/// # Arguments
+/// * `metrics` - Shared metrics collector instance
+/// * `port` - Port number to bind the server to
+///
+/// # Returns
+/// Returns `Ok(())` when the server shuts down gracefully, or an error
+/// if the server fails to start.
+///
+/// # Endpoints
+/// * `GET /metrics` - Prometheus metrics endpoint
 pub async fn serve_metrics(metrics: Arc<Metrics>, port: u16) -> Result<()> {
     let app = Router::new()
         .route("/metrics", get(metrics_handler))

@@ -26,101 +26,191 @@ struct Args {
     prometheus_endpoint: String,
 }
 
-// Node registration structures
+/// Node registration request structure.
+///
+/// This structure represents a request from a mesh node to register itself
+/// with the registry service. It contains the essential information needed
+/// to track and communicate with the node.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct NodeRegistration {
+    /// String representation of the node's unique identifier
     pub id: String,
+    /// IP address where the node can be reached
     pub ip: String,
+    /// Port number where the node exposes Prometheus metrics
     pub metrics_port: u16,
 }
 
+/// Graph data structure for Grafana node graph visualization.
+///
+/// This structure represents the complete graph topology for visualization
+/// in Grafana dashboards. It contains both the nodes and their connections
+/// (edges) in the mesh network.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GraphData {
+    /// List of nodes in the mesh network
     pub nodes: Vec<GraphNode>,
+    /// List of connections between nodes
     pub edges: Vec<Edge>,
 }
 
-// Data structures for Grafana node graph panel
+/// Node representation for Grafana node graph visualization.
+///
+/// This structure represents a single node in the Grafana node graph panel.
+/// It includes visual properties and statistics for display in the graph.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GraphNode {
+    /// Unique identifier for the node
     pub id: String,
+    /// Display title for the node
     pub title: String,
+    /// Optional subtitle text
     pub subtitle: Option<String>,
+    /// Primary statistic (typically connected peers count)
     pub mainStat: f64,
+    /// Optional secondary statistic
     pub secondaryStat: Option<f64>,
+    /// Detailed node information
     pub detail: NodeDetail,
+    /// Optional color for the node visualization
     pub color: Option<String>,
 }
 
+/// Detailed information about a node for graph visualization.
+///
+/// This structure contains additional details about a node that are
+/// displayed in the Grafana node graph panel when inspecting a node.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct NodeDetail {
+    /// IP address of the node
     pub ip: String,
+    /// Node identifier
     pub id: String,
+    /// Number of connected peers
     pub connected_peers: f64,
 }
 
+/// Edge representation for Grafana node graph visualization.
+///
+/// This structure represents a connection between two nodes in the Grafana
+/// node graph panel. It includes RTT statistics and visual properties.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Edge {
+    /// Unique identifier for the edge
     pub id: String,
+    /// Source node identifier
     pub source: String,
+    /// Target node identifier
     pub target: String,
+    /// Primary statistic (typically current RTT)
     pub mainStat: f64,
+    /// Optional secondary statistic (typically average RTT)
     pub secondaryStat: Option<f64>,
+    /// Detailed edge information
     pub detail: EdgeDetail,
 }
 
+/// Detailed information about an edge for graph visualization.
+///
+/// This structure contains RTT statistics for a connection between two nodes
+/// that are displayed in the Grafana node graph panel.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EdgeDetail {
+    /// Current round-trip time in milliseconds
     pub rtt_current: Option<f64>,
+    /// Average round-trip time in milliseconds
     pub rtt_avg: f64,
 }
 
-// Prometheus service discovery structures
+/// Prometheus service discovery target configuration.
+///
+/// This structure represents a target configuration for Prometheus service
+/// discovery. It defines where Prometheus should scrape metrics from and
+/// what labels to apply to the scraped metrics.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PrometheusTarget {
+    /// List of target addresses (host:port) to scrape
     pub targets: Vec<String>,
+    /// Labels to apply to metrics from these targets
     pub labels: PrometheusLabels,
 }
 
+/// Labels for Prometheus metrics from mesh nodes.
+///
+/// This structure defines the labels that Prometheus will apply to all
+/// metrics scraped from a particular mesh node target.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PrometheusLabels {
+    /// Job name for the Prometheus scrape configuration
     pub job: String,
+    /// Node identifier for labeling metrics
     pub node_id: String,
+    /// Node IP address for labeling metrics
     pub node_ip: String,
 }
 
-// Prometheus query response structures
+/// Response structure for Prometheus query API.
+///
+/// This structure represents the top-level response from the Prometheus
+/// query API when requesting metric data.
 #[derive(Deserialize, Debug)]
 struct PrometheusResponse {
+    /// The data portion of the Prometheus response
     data: PrometheusData,
 }
 
+/// Data portion of a Prometheus query response.
+///
+/// This structure contains the actual metric results from a Prometheus query.
 #[derive(Deserialize, Debug)]
 struct PrometheusData {
+    /// Array of metric results from the query
     result: Vec<PrometheusResult>,
 }
 
+/// Individual metric result from a Prometheus query.
+///
+/// This structure represents a single metric result, including its labels
+/// and current value.
 #[derive(Deserialize, Debug)]
 struct PrometheusResult {
+    /// Labels associated with this metric
     metric: HashMap<String, String>,
+    /// Value tuple containing [timestamp, value]
     value: [serde_json::Value; 2],
 }
 
-// Application state
+/// Application state for the mesh registry service.
+///
+/// This structure holds the shared state and configuration for the registry
+/// service, including HTTP client, Prometheus endpoint, and node registry.
 #[derive(Clone)]
 pub struct App {
+    /// Prometheus server endpoint for querying metrics
     pub prometheus_endpoint: String,
+    /// HTTP client for making requests to Prometheus
     pub http_client: reqwest::Client,
+    /// Thread-safe registry of active mesh nodes
     pub registry: Arc<Mutex<Registry>>,
 }
 
+/// Main entry point for the mesh registry service.
+///
+/// This function initializes the registry service with all necessary components:
+/// - HTTP client for Prometheus queries
+/// - Node registry with 1-minute TTL
+/// - Background cleanup task for stale nodes
+/// - Web server on port 5000
+///
+/// # Returns
+/// Returns `Ok(())` on successful startup, or an error if initialization fails.
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
     log::init_logging();
 
     let http_client = reqwest::Client::new();
-    let registry = Arc::new(Mutex::new(Registry::new(Duration::from_secs(120)))); // 2 minute TTL
+    let registry = Arc::new(Mutex::new(Registry::new(Duration::from_secs(60))));
 
     let app = App {
         prometheus_endpoint: args.prometheus_endpoint,
@@ -137,6 +227,21 @@ async fn main() -> Result<()> {
     serve(app, 5000).await
 }
 
+/// Starts the HTTP server for the mesh registry service.
+///
+/// This function sets up all the HTTP routes and starts the server:
+/// - `/graph` - GET endpoint for Grafana graph data
+/// - `/prometheus/targets` - GET endpoint for Prometheus service discovery
+/// - `/register` - POST endpoint for node registration
+/// - `/heartbeat` - POST endpoint for node heartbeats
+/// - `/` - GET endpoint for health checks
+///
+/// # Arguments
+/// * `app` - Application state containing registry and HTTP client
+/// * `port` - Port number to bind the server to
+///
+/// # Returns
+/// Returns `Ok(())` when the server shuts down gracefully, or an error if startup fails.
 async fn serve(app: App, port: u16) -> Result<()> {
     let router = Router::new()
         .route("/graph", get(graph_handler))
@@ -199,6 +304,11 @@ async fn heartbeat_handler(
     Ok(StatusCode::OK)
 }
 
+/// Background task to periodically clean up stale node registrations.
+///
+/// This function runs in a background task and periodically calls the registry's
+/// purge method to remove nodes that haven't been seen within the TTL period.
+/// It runs every 30 seconds and logs when nodes are removed.
 async fn cleanup_stale_nodes(registry: Arc<Mutex<Registry>>) {
     let mut interval = tokio::time::interval(Duration::from_secs(30));
 
