@@ -66,8 +66,6 @@ pub struct Node {
     connection: Connection,
     /// Shared state databases for peers, sessions, and ping tracking
     state: State,
-    /// Port where this node's metrics server is listening
-    metrics_port: u16,
     /// IP of the node
     ip: String,
 }
@@ -99,7 +97,6 @@ impl Node {
         connection: Connection,
         state: State,
         ip: String,
-        metrics_port: u16,
     ) -> Self {
         Node {
             id,
@@ -108,7 +105,6 @@ impl Node {
             connection,
             state,
             ip,
-            metrics_port,
         }
     }
 
@@ -1200,7 +1196,7 @@ impl Node {
             connected_count,
             local_ip.as_str(),
             self.id,
-            self.metrics_port,
+            self.connection.unicast_port,
         );
 
         Ok(())
@@ -1214,5 +1210,9 @@ impl Node {
     /// Returns the node's local IP address.
     pub fn get_local_ip(&self) -> String {
         format!("{}:{}", self.ip.clone(), self.connection.unicast_port)
+    }
+
+    pub fn get_port(&self) -> u16 {
+        self.connection.unicast_port
     }
 }

@@ -20,10 +20,6 @@ use tracing::{error, info};
 #[command(name = "mesh-node")]
 #[command(about = "A mesh network node")]
 struct Args {
-    /// Port for the Prometheus metrics server
-    #[arg(long, default_value = "8080")]
-    metrics_port: u16,
-
     /// Mesh-registry service endpoint for registration
     #[arg(long, default_value = "http://localhost:5000")]
     mesh_registry_endpoint: String,
@@ -85,7 +81,7 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     log::init_logging();
 
-    let node = init_node(args.metrics_port)
+    let node = init_node()
         .await
         .context("Failed to initialize node")?;
 
@@ -109,10 +105,11 @@ async fn main() -> Result<()> {
     let metrics = Arc::new(Metrics::new()?);
 
     // --- Metrics Server Task ---
+    let metrics_node = node.clone();
     tokio::spawn({
         let metrics_svr = metrics.clone();
         async move {
-            if let Err(e) = serve_metrics(metrics_svr, args.metrics_port).await {
+            if let Err(e) = serve_metrics(metrics_svr, metrics_node.get_port()).await {
                 tracing::error!("Metrics server failed: {}", e);
             }
         }
@@ -125,7 +122,7 @@ async fn main() -> Result<()> {
     // --- Mesh-Registry Registration Task ---
     let registration_node = node.clone();
     let mesh_registry_endpoint = args.mesh_registry_endpoint.clone();
-    let registration_metrics_port = args.metrics_port;
+    let registration_metrics_port = registration_node.get_port();
     tokio::spawn(async move {
         if let Err(e) = heartbeat_task(
             registration_node,
@@ -194,7 +191,7 @@ async fn heartbeat_task(
 /// * Multicast socket joins the discovery group and listens on the standard port
 /// * Unicast socket binds to an ephemeral port for peer-to-peer communication
 /// * Both sockets are configured for optimal performance and reliability
-async fn init_node(metrics_port: u16) -> Result<Arc<Node>> {
+async fn init_node() -> Result<Arc<Node>> {
     let node_id: mesh::NodeId = rand::random();
     info!(node_id = node_id, "Starting node with ID");
 
@@ -222,7 +219,6 @@ async fn init_node(metrics_port: u16) -> Result<Arc<Node>> {
         "Unicast listening on port: {}", unicast_port
     );
 
-    // Get the actual local IP address by connecting to a remote address
     let local_ip = get_local_ip().await?;
     info!(local_ip = local_ip, "Detected local IP address");
 
@@ -246,12 +242,10 @@ async fn init_node(metrics_port: u16) -> Result<Arc<Node>> {
         connection,
         state,
         local_ip,
-        metrics_port,
     )))
 }
 
 async fn get_local_ip() -> Result<String> {
-    // Connect to a remote address to determine our local IP
     let socket = UdpSocket::bind("0.0.0.0:0").await?;
     socket.connect("8.8.8.8:80").await?;
     let local_addr = socket.local_addr()?;
@@ -297,7 +291,7 @@ pub async fn serve_metrics(metrics: Arc<Metrics>, port: u16) -> Result<()> {
         .with_state(metrics);
 
     let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
-    tracing::info!(
+    info!(
         "Metrics server listening on http://0.0.0.0:{}/metrics",
         port
     );

@@ -6,6 +6,7 @@ services:
     container_name: swarm-mesh-prometheus
     ports:
       - "9090:9090"
+    network_mode: "host"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
@@ -23,6 +24,7 @@ services:
     container_name: swarm-mesh-grafana
     ports:
       - "3000:3000"
+    network_mode: "host"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning

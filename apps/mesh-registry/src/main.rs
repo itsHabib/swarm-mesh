@@ -240,9 +240,8 @@ async fn prometheus_targets_handler(
         let node_id_str = node_entry.node.id.to_string();
         let metrics_port = node_entry.node.metrics_port;
 
-        // Use host.docker.internal for Docker compatibility for now
         targets.push(PrometheusTarget {
-            targets: vec![format!("host.docker.internal:{}", metrics_port)],
+            targets: vec![format!("{}:{}", node_entry.node.ip, node_entry.node.metrics_port)],
             labels: PrometheusLabels {
                 job: "mesh-node".to_string(),
                 node_id: node_id_str,
