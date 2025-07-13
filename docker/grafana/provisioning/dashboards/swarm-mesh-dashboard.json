@@ -83,7 +83,7 @@
             "uid": "PBFA97CFB590B2093"
           },
           "expr": "mesh_connected_peers_total",
-          "legendFormat": "Node {{node_id}} ({{node_ip}})",
+          "legendFormat": "Node {{node_id}} ({{node_ip}}:{{node_port}})",
           "refId": "A"
         }
       ],
@@ -108,7 +108,7 @@
           "showLineNumbers": false,
           "showMiniMap": false
         },
-        "content": "<div style=\"text-align: center; padding: 20px;\">\n  <h3>Mesh Network Status</h3>\n  <p>Monitor your swarm-mesh network health and connectivity.</p>\n  <p><strong>Active Monitoring:</strong> RTT, Peer Connections, Network Health</p>\n</div>",
+        "content": "<div style=\"text-align: center; padding: 20px;\">\n  <h3>Mesh Network Status</h3>\n  <p>Monitor your swarm-mesh network health and connectivity.</p>\n  <p><strong>Active Monitoring:</strong> RTT, Peer Connections, Node Graph</p>\n</div>",
         "mode": "html"
       },
       "pluginVersion": "12.0.2",
@@ -233,7 +233,7 @@
         "edges": {
           "dataFrameRefId": "edges",
           "mainStatUnit": "ms",
-          "secondaryStatUnit": "dtdurationms"
+          "secondaryStatUnit": "ms"
         },
         "layoutAlgorithm": "layered",
         "nodes": {
@@ -245,43 +245,43 @@
       "pluginVersion": "12.0.2",
       "targets": [
         {
-          "cacheDurationSeconds": 60,
+          "cacheDurationSeconds": 20,
           "datasource": {
             "type": "marcusolsson-json-datasource",
             "uid": "mesh-registry"
           },
           "fields": [
             {
-              "jsonPath": "$[*].id",
+              "jsonPath": "$.nodes[*].id",
               "language": "jsonpath"
             },
             {
-              "jsonPath": "$[*].color",
+              "jsonPath": "$.nodes[*].color",
               "language": "jsonpath",
               "name": ""
             },
             {
-              "jsonPath": "$[*].detail",
+              "jsonPath": "$.nodes[*].detail",
               "language": "jsonpath",
               "name": ""
             },
             {
-              "jsonPath": "$[*].mainStat",
+              "jsonPath": "$.nodes[*].mainStat",
               "language": "jsonpath",
               "name": ""
             },
             {
-              "jsonPath": "$[*].title",
+              "jsonPath": "$.nodes[*].title",
               "language": "jsonpath",
               "name": ""
             },
             {
-              "jsonPath": "$[*].subtitle",
+              "jsonPath": "$.nodes[*].subtitle",
               "language": "jsonpath",
               "name": ""
             },
             {
-              "jsonPath": "$[*].secondaryStat",
+              "jsonPath": "$.nodes[*].secondaryStat",
               "language": "jsonpath",
               "name": ""
             }
@@ -290,40 +290,40 @@
           "queryParams": "",
           "refId": "nodes",
           "target": "graph/nodes",
-          "urlPath": "/graph/nodes"
+          "urlPath": "/graph"
         },
         {
-          "cacheDurationSeconds": 300,
+          "cacheDurationSeconds": 20,
           "datasource": {
             "type": "marcusolsson-json-datasource",
             "uid": "mesh-registry"
           },
           "fields": [
             {
-              "jsonPath": "$[*].id"
+              "jsonPath": "$.edges[*].id"
             },
             {
-              "jsonPath": "$[*].source",
+              "jsonPath": "$.edges[*].source",
               "language": "jsonpath",
               "name": ""
             },
             {
-              "jsonPath": "$[*].target",
+              "jsonPath": "$.edges[*].target",
               "language": "jsonpath",
               "name": ""
             },
             {
-              "jsonPath": "$[*].detail",
+              "jsonPath": "$.edges[*].detail",
               "language": "jsonpath",
               "name": ""
             },
             {
-              "jsonPath": "$[*].mainStat",
+              "jsonPath": "$.edges[*].mainStat",
               "language": "jsonpath",
               "name": ""
             },
             {
-              "jsonPath": "$[*].secondaryStat",
+              "jsonPath": "$.edges[*].secondaryStat",
               "language": "jsonpath",
               "name": ""
             }
@@ -332,7 +332,7 @@
           "method": "GET",
           "queryParams": "",
           "refId": "edges",
-          "urlPath": "/graph/edges"
+          "urlPath": "/graph"
         }
       ],
       "title": "Mesh Network Graph",

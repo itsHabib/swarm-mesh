@@ -13,7 +13,7 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::time;
 use tokio::{net::UdpSocket, sync::Mutex};
-use tracing::{error, info};
+use tracing::{debug, info, error};
 
 /// Command line arguments for the mesh node application.
 #[derive(Parser, Debug)]
@@ -110,7 +110,7 @@ async fn main() -> Result<()> {
         let metrics_svr = metrics.clone();
         async move {
             if let Err(e) = serve_metrics(metrics_svr, metrics_node.get_port()).await {
-                tracing::error!("Metrics server failed: {}", e);
+                error!("Metrics server failed: {}", e);
             }
         }
     });
@@ -127,7 +127,6 @@ async fn main() -> Result<()> {
         if let Err(e) = heartbeat_task(
             registration_node,
             mesh_registry_endpoint,
-            registration_metrics_port,
         )
         .await
         {
@@ -143,7 +142,6 @@ async fn main() -> Result<()> {
 async fn heartbeat_task(
     node: Arc<Node>,
     mesh_registry_endpoint: String,
-    metrics_port: u16,
 ) -> Result<()> {
     let client = reqwest::Client::new();
     let mut interval = time::interval(Duration::from_secs(10)); // Heartbeat every 30 seconds
@@ -154,7 +152,7 @@ async fn heartbeat_task(
         let registration = NodeRegistration {
             id: node.get_id().to_string(),
             ip: node.get_local_ip(),
-            metrics_port,
+            metrics_port: node.get_port(),
         };
 
         // Try to send heartbeat, fallback to registration if needed
@@ -163,13 +161,13 @@ async fn heartbeat_task(
         match client.post(&url).json(&registration).send().await {
             Ok(response) => {
                 if response.status().is_success() {
-                    info!("Heartbeat sent to mesh-registry");
+                    debug!("heartbeat sent to mesh-registry");
                 } else {
-                    error!("Heartbeat failed: {}", response.status());
+                    error!("heartbeat failed: {}", response.status());
                 }
             }
             Err(e) => {
-                error!("Failed to send heartbeat: {}", e);
+                error!("failed to send heartbeat: {}", e);
             }
         }
     }

@@ -390,7 +390,7 @@ impl Node {
             };
 
             if peers.is_empty() {
-                info!("no peers to ping");
+                debug!("no peers to ping");
                 continue;
             }
 
@@ -1209,7 +1209,7 @@ impl Node {
 
     /// Returns the node's local IP address.
     pub fn get_local_ip(&self) -> String {
-        format!("{}:{}", self.ip.clone(), self.connection.unicast_port)
+        self.ip.clone()
     }
 
     pub fn get_port(&self) -> u16 {

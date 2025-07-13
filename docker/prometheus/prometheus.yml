@@ -2,10 +2,6 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
-rule_files:
-  # - "first_rules.yml"
-  # - "second_rules.yml"
-
 scrape_configs:
   # Prometheus itself
   - job_name: 'prometheus'
@@ -15,8 +11,8 @@ scrape_configs:
   # Swarm Mesh Nodes - Dynamic service discovery via mesh-registry
   - job_name: 'mesh-node'
     http_sd_configs:
-      - url: 'http://lcoalhost:5000/prometheus/targets'
-        refresh_interval: 10s
+      - url: 'http://localhost:5000/prometheus/targets'
+        refresh_interval: 5s
     scrape_interval: 15s
     metrics_path: /metrics
     scheme: http

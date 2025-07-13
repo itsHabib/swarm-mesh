@@ -69,7 +69,7 @@ impl Metrics {
                 "mesh_connected_peers_total",
                 "Total number of connected peers for this node",
             ),
-            &["node_id", "node_ip", "node_metric_port"],
+            &["node_id", "node_ip", "node_port"],
         )?;
 
         // Register all metrics

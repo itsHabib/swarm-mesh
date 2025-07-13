@@ -8,9 +8,11 @@ use clap::Parser;
 use registry::{Node, Registry};
 use serde::{Deserialize, Serialize};
 use serde_json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::os::macos::raw::mode_t;
 use std::sync::Arc;
 use std::time::Duration;
+use serde_json::json;
 use tokio::{net::TcpListener, sync::Mutex};
 use tracing::{debug, error, info};
 
@@ -30,6 +32,12 @@ pub struct NodeRegistration {
     pub id: String,
     pub ip: String,
     pub metrics_port: u16,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GraphData {
+    pub nodes: Vec<GraphNode>,
+    pub edges: Vec<Edge>,
 }
 
 // Data structures for Grafana node graph panel
@@ -131,8 +139,7 @@ async fn main() -> Result<()> {
 
 async fn serve(app: App, port: u16) -> Result<()> {
     let router = Router::new()
-        .route("/graph/nodes", get(nodes_handler))
-        .route("/graph/edges", get(edges_handler))
+        .route("/graph", get(graph_handler))
         .route("/prometheus/targets", get(prometheus_targets_handler))
         .route("/register", post(register_node_handler))
         .route("/heartbeat", post(heartbeat_handler))
@@ -209,24 +216,24 @@ async fn cleanup_stale_nodes(registry: Arc<Mutex<Registry>>) {
     }
 }
 
-async fn nodes_handler(State(app): State<App>) -> Result<Json<Vec<GraphNode>>, StatusCode> {
-    match query_prometheus_for_nodes(&app).await {
-        Ok(nodes) => Ok(Json(nodes)),
+async fn graph_handler(State(app): State<App>) -> Result<Json<GraphData>, StatusCode> {
+    let nodes = match query_prometheus_for_nodes(&app).await {
+        Ok(nodes) => nodes,
         Err(e) => {
             error!("Error querying Prometheus for nodes: {}", e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
-    }
-}
+    };
 
-async fn edges_handler(State(app): State<App>) -> Result<Json<Vec<Edge>>, StatusCode> {
-    match query_prometheus_for_edges(&app).await {
-        Ok(edges) => Ok(Json(edges)),
+    let edges = match query_prometheus_for_edges(&app, &nodes).await {
+        Ok(edges) => edges,
         Err(e) => {
             error!("Error querying Prometheus for edges: {}", e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
-    }
+    };
+
+    Ok(Json(GraphData{ nodes, edges }))
 }
 
 async fn prometheus_targets_handler(
@@ -238,10 +245,9 @@ async fn prometheus_targets_handler(
 
     for node_entry in registry.nodes() {
         let node_id_str = node_entry.node.id.to_string();
-        let metrics_port = node_entry.node.metrics_port;
 
         targets.push(PrometheusTarget {
-            targets: vec![format!("{}:{}", node_entry.node.ip, node_entry.node.metrics_port)],
+            targets: vec![format!("{}:{}", node_entry.node.ip.clone(), node_entry.node.metrics_port)],
             labels: PrometheusLabels {
                 job: "mesh-node".to_string(),
                 node_id: node_id_str,
@@ -250,74 +256,13 @@ async fn prometheus_targets_handler(
         });
     }
 
-    info!("service discovery targets: {}", targets.len());
+    debug!("service discovery targets: {}", targets.len());
     Ok(Json(targets))
 }
 
 // JSON datasource health check
 async fn health_check() -> StatusCode {
     StatusCode::OK
-}
-
-async fn query_prometheus_for_targets(app: &App) -> Result<Vec<PrometheusTarget>> {
-    let url = format!("{}/api/v1/query", app.prometheus_endpoint);
-    let response = app
-        .http_client
-        .get(&url)
-        .query(&[("query", "mesh_connected_peers_total")])
-        .send()
-        .await?;
-
-    if !response.status().is_success() {
-        error!(
-            "Prometheus query failed for connected peers metric: {}",
-            response.status()
-        );
-        return Ok(Vec::new());
-    }
-
-    let prom_response: PrometheusResponse = response.json().await?;
-    let mut targets = Vec::new();
-
-    for result in prom_response.data.result {
-        let node_id = match result.metric.get("node_id") {
-            Some(id) => id.clone(),
-            None => {
-                error!("Prometheus query result missing node_id: {:?}", result);
-                continue;
-            }
-        };
-        let node_ip = match result.metric.get("node_ip") {
-            Some(ip) => ip.clone(),
-            None => {
-                error!("Prometheus query result missing node_ip: {:?}", result);
-                continue;
-            }
-        };
-        let metrics_port = match result.metric.get("node_metric_port") {
-            Some(port) => port.clone(),
-            None => {
-                error!(
-                    "Prometheus query result missing node_metric_port: {:?}",
-                    result
-                );
-                continue;
-            }
-        };
-
-        targets.push(PrometheusTarget {
-            targets: vec![format!("{}:{}", node_ip, metrics_port)],
-            labels: PrometheusLabels {
-                job: "mesh-node".to_string(),
-                node_id,
-                node_ip,
-            },
-        });
-    }
-
-    info!("service discovery targets: {}", targets.len());
-
-    Ok(targets)
 }
 
 async fn query_prometheus_for_nodes(app: &App) -> Result<Vec<GraphNode>> {
@@ -355,6 +300,10 @@ async fn query_prometheus_for_nodes(app: &App) -> Result<Vec<GraphNode>> {
                 continue;
             }
         };
+        let node_port = match result.metric.get("node_port") {
+            Some(port) => port.parse::<u16>().unwrap_or(0),
+            None => 0,
+        };
 
         let connected_peers = match result.value[1].as_str() {
             Some(v) => v.parse::<f64>().unwrap_or(0.0),
@@ -368,7 +317,7 @@ async fn query_prometheus_for_nodes(app: &App) -> Result<Vec<GraphNode>> {
         let gn = GraphNode {
             id: node_id.clone(),
             title: format!("Node {}", node_id),
-            subtitle: Some(node_ip.clone()),
+            subtitle: Some(format!("{}:{}", node_ip.clone(), node_port.clone())),
             mainStat: connected_peers,
             secondaryStat: None,
             detail: NodeDetail {
@@ -385,7 +334,7 @@ async fn query_prometheus_for_nodes(app: &App) -> Result<Vec<GraphNode>> {
     Ok(nodes)
 }
 
-async fn query_prometheus_for_edges(app: &App) -> Result<Vec<Edge>> {
+async fn query_prometheus_for_edges(app: &App, nodes: &Vec<GraphNode>) -> Result<Vec<Edge>> {
     let metrics = vec![
         "mesh_peer_rtt_current_milliseconds",
         "mesh_peer_rtt_avg_milliseconds",
@@ -466,6 +415,7 @@ async fn query_prometheus_for_edges(app: &App) -> Result<Vec<Edge>> {
 
     // Convert to Edge structures
     let mut edges = Vec::new();
+    let mut missing: HashSet<String> = HashSet::new();
     for (edge_key, detail) in edge_data {
         let parts: Vec<&str> = edge_key.split('_').collect();
         if parts.len() != 2 {
@@ -475,6 +425,24 @@ async fn query_prometheus_for_edges(app: &App) -> Result<Vec<Edge>> {
 
         let source = parts[0].to_string();
         let target = parts[1].to_string();
+        let mut contains = |id: &str| -> bool {
+            if missing.contains(id) {
+                return false;
+            }
+            match nodes.iter().any(|n| n.id == id) {
+                true => true,
+                false => {
+                    missing.insert(id.to_string());
+                    false
+                }
+            }
+        };
+
+        if !contains(source.as_str()) || !contains(target.as_str()) {
+            debug!("Skipping edge with unknown nodes: {} -> {}", source, target);
+            continue;
+        }
+
         let main_stat = detail.rtt_current.unwrap_or(detail.rtt_avg);
         let secondary_stat = Some(detail.rtt_avg);
 
