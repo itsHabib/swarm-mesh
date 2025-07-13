@@ -83,23 +83,23 @@ The project is organized into several crates:
 # Build the project
 cargo build --release
 
-# Run a node with default metrics port (8080)
-cargo run --bin node -- --metrics-port 8080
+# Run a node (port is automatically assigned)
+cargo run --bin node
 
-# Run additional nodes on different ports
-cargo run --bin node -- --metrics-port 8081 &
-cargo run --bin node -- --metrics-port 8082 &
-cargo run --bin node -- --metrics-port 8083 &
+# Run additional nodes
+cargo run --bin node &
+cargo run --bin node &
+cargo run --bin node &
 
 # Run with debug logging
-RUST_LOG=debug cargo run --bin node -- --metrics-port 8080
+RUST_LOG=debug cargo run --bin node
 ```
 
 ### Command Line Options
 
-- `--metrics-port <PORT>`: Port for Prometheus metrics server (default: 8080)
+- `--mesh-registry-endpoint <URL>`: Mesh registry service endpoint (default: http://localhost:5000)
 
-Each node exposes metrics at `http://localhost:<PORT>/metrics`
+Each node automatically assigns an ephemeral port for metrics and registers with the mesh-registry service for monitoring discovery.
 
 ## Metrics and Monitoring
 
