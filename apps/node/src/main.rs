@@ -123,12 +123,19 @@ async fn main() -> Result<()> {
     // --- Mesh-Registry Registration Task ---
     let registration_node = node.clone();
     let mesh_registry_endpoint = args.mesh_registry_endpoint.clone();
-    let registration_metrics_port = registration_node.get_port();
     tokio::spawn(async move {
         if let Err(e) = heartbeat_task(registration_node, mesh_registry_endpoint).await {
             error!("Heartbeat task failed: {}", e);
         }
     });
+
+    // --- LSA Refresh Task ---
+    let lsa_refresh_node = node.clone();
+    tokio::spawn(async move { lsa_refresh_node.lsa_refresh().await });
+
+    // --- LSA Cleanup Task ---
+    let lsa_cleanup_node = node.clone();
+    tokio::spawn(async move { lsa_cleanup_node.lsa_cleanup().await });
 
     tokio::signal::ctrl_c().await?;
 
@@ -219,10 +226,11 @@ async fn init_node() -> Result<Arc<Node>> {
     let local_ip = get_local_ip().await?;
     info!(local_ip = local_ip, "Detected local IP address");
 
-    let link_state_db: node::LinkStateDb = Arc::new(Mutex::new(HashMap::new()));
+    let peer_db: node::PeerDb = Arc::new(Mutex::new(HashMap::new()));
     let session_state_db: node::SessionDb = Arc::new(Mutex::new(HashMap::new()));
     let ping_state_db: node::PingDb = Arc::new(Mutex::new(HashMap::new()));
-    let state = State::new(link_state_db, session_state_db, ping_state_db);
+    let link_state_db: node::LinkStateDb = Arc::new(Mutex::new(HashMap::new()));
+    let state = State::new(peer_db, session_state_db, ping_state_db, link_state_db);
 
     let multicast_socket = Arc::new(multicast_socket);
     let unicast_socket = Arc::new(unicast_socket);

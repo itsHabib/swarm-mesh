@@ -1,9 +1,9 @@
-use mesh::{NodeId, PeerInfo, PeerSession};
+use mesh::{LinkStatePayload, NodeId, PeerInfo, PeerSession};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-/// Type alias for the link state database.
+/// Type alias for the peer database.
 ///
 /// This database maintains information about all discovered peers in the mesh network.
 /// It maps node IDs to their connection information, including network addresses,
@@ -18,7 +18,7 @@ use tokio::sync::Mutex;
 ///
 /// # Thread Safety
 /// Wrapped in Arc<Mutex<>> to allow safe concurrent access across async tasks.
-pub type LinkStateDb = Arc<Mutex<HashMap<NodeId, PeerInfo>>>;
+pub type PeerDb = Arc<Mutex<HashMap<NodeId, PeerInfo>>>;
 
 /// Type alias for the session database.
 ///
@@ -56,6 +56,32 @@ pub type SessionDb = Arc<Mutex<HashMap<NodeId, PeerSession>>>;
 /// when pings timeout to prevent unbounded memory growth.
 pub type PingDb = Arc<Mutex<HashMap<(NodeId, u64), std::time::Instant>>>;
 
+/// Type alias for the Link State Advertisement database.
+///
+/// This database maintains the network topology by storing Link State Advertisements
+/// from all nodes in the mesh. Each LSA contains a node's view of its direct neighbors,
+/// and together they form a complete network topology that can be used for routing
+/// decisions and network visualization. LSAs are flooded throughout the network to
+/// ensure all nodes have a consistent view of the topology.
+///
+/// # Key: NodeId
+/// The unique identifier for the node that generated the LSA.
+///
+/// # Value: LinkStatePayload
+/// The complete LSA information including neighbor list, sequence number, and timestamp.
+///
+/// # Thread Safety
+/// Wrapped in Arc<Mutex<>> to allow safe concurrent access across async tasks.
+///
+/// # Cleanup
+/// Entries are automatically removed when LSAs become stale (older than 180 seconds)
+/// to prevent unbounded memory growth and maintain topology accuracy.
+///
+/// # Freshness
+/// LSAs include sequence numbers and timestamps to handle ordering and detect
+/// newer information when multiple LSAs from the same node are received.
+pub type LinkStateDb = Arc<Mutex<HashMap<NodeId, LinkStatePayload>>>;
+
 /// Central state management for a mesh node.
 ///
 /// This struct consolidates all the stateful information that a mesh node
@@ -74,11 +100,14 @@ pub type PingDb = Arc<Mutex<HashMap<(NodeId, u64), std::time::Instant>>>;
 /// to minimize contention.
 pub struct State {
     /// Database of discovered peers and their connection information
-    pub(crate) link_db: LinkStateDb,
+    pub(crate) peer_db: PeerDb,
     /// Database of cryptographic sessions with peers
     pub(crate) session_db: SessionDb,
     /// Database of outstanding ping requests for RTT measurement
     pub(crate) ping_db: PingDb,
+
+    /// Database of Link State Advertisements for network topology
+    pub(crate) link_state_db: LinkStateDb,
 }
 
 impl State {
@@ -89,9 +118,10 @@ impl State {
     /// flexible initialization and testing scenarios.
     ///
     /// # Arguments
-    /// * `link_db` - Thread-safe database for peer connection information
+    /// * `peer_db` - Thread-safe database for peer connection information
     /// * `session_db` - Thread-safe database for cryptographic sessions
     /// * `ping_db` - Thread-safe database for ping tracking
+    /// * `link_state_db` - Thread-safe database for Link State Advertisements
     ///
     /// # Returns
     /// A new State instance ready for mesh node operations
@@ -99,11 +129,12 @@ impl State {
     /// # Usage
     /// Typically called during node initialization after creating empty
     /// HashMaps wrapped in Arc<Mutex<>> for thread-safe access.
-    pub fn new(link_db: LinkStateDb, session_db: SessionDb, ping_db: PingDb) -> Self {
+    pub fn new(peer_db: PeerDb, session_db: SessionDb, ping_db: PingDb, link_state_db: LinkStateDb) -> Self {
         Self {
-            link_db,
+            peer_db,
             session_db,
             ping_db,
+            link_state_db,
         }
     }
 }

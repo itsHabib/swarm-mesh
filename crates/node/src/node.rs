@@ -11,9 +11,10 @@ use mesh::{
 };
 use noise;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc};
 use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
+use tokio::sync::Mutex;
 use tokio::time;
 use tracing::{debug, error, info};
 
@@ -68,6 +69,8 @@ pub struct Node {
     state: State,
     /// IP of the node
     ip: String,
+    /// Sequence number for Link State Advertisements (LSAs)
+    lsa_sequence: Arc<Mutex<u64>>,
 }
 
 impl Node {
@@ -105,6 +108,7 @@ impl Node {
             connection,
             state,
             ip,
+            lsa_sequence: Arc::new(Mutex::new(0)),
         }
     }
 
@@ -137,7 +141,7 @@ impl Node {
     /// to be spawned as a long-running async task.
     pub async fn receive(&self) -> ! {
         let session_db_recv = self.state.session_db.clone();
-        let link_db_recv = self.state.link_db.clone();
+        let peer_db_recv = self.state.peer_db.clone();
 
         loop {
             let mut mcast_buf = [0u8; 1500];
@@ -200,7 +204,7 @@ impl Node {
                     }
 
                     if session_db_recv.lock().await.contains_key(&payload.node_id) {
-                        link_db_recv
+                        peer_db_recv
                             .lock()
                             .await
                             .entry(payload.node_id)
@@ -268,6 +272,15 @@ impl Node {
 
                     if let Err(e) = self.send_unicast_message(msg, unicast_port, src_addr).await {
                         error!(error = %e, "error sending handshake response");
+                    }
+                }
+                Message::LinkState(payload) => {
+                    if payload.node_id == self.id {
+                        continue;
+                    }
+                    
+                    if let Err(e) = self.handle_lsa(payload, src_addr).await {
+                        error!(error = %e, "error handling LSA");
                     }
                 }
                 _ => {
@@ -363,7 +376,7 @@ impl Node {
             time::Instant::now() + Duration::from_millis(PING_INTERVAL_MS),
             Duration::from_millis(PING_INTERVAL_MS),
         );
-        let link_db = self.state.link_db.clone();
+        let peer_db = self.state.peer_db.clone();
         let ping_db = self.state.ping_db.clone();
         let session_db = self.state.session_db.clone();
         let mut sequence = 0u64;
@@ -375,10 +388,10 @@ impl Node {
             self.clean_stale_pings().await;
 
             let peers: Vec<_> = {
-                let link_db = link_db.lock().await;
+                let peer_db = peer_db.lock().await;
                 let session_db = session_db.lock().await;
 
-                link_db
+                peer_db
                     .iter()
                     .filter_map(|(id, info)| {
                         session_db.get(id).and_then(|s| {
@@ -450,9 +463,9 @@ impl Node {
             "received valid ping from peer",
         );
 
-        let link_db = self.state.link_db.clone();
-        let link_db = link_db.lock().await;
-        let peer_info = match link_db.get(&payload.node_id) {
+        let peer_db = self.state.peer_db.clone();
+        let peer_db = peer_db.lock().await;
+        let peer_info = match peer_db.get(&payload.node_id) {
             Some(info) => info,
             None => {
                 return Ok(None);
@@ -509,10 +522,10 @@ impl Node {
             "received valid pong from peer",
         );
 
-        let link_db = self.state.link_db.clone();
-        let mut link_db = link_db.lock().await;
+        let peer_db = self.state.peer_db.clone();
+        let mut peer_db = peer_db.lock().await;
 
-        match link_db.get_mut(&k.0) {
+        match peer_db.get_mut(&k.0) {
             Some(p) => {
                 p.rtt_stats
                     .get_or_insert_with(RttStats::default)
@@ -548,10 +561,10 @@ impl Node {
     /// * Peers that haven't completed the handshake process
     /// * Peers with failed or incomplete secure sessions
     async fn can_take_ping(&self, payload: &PingPongPayload) -> bool {
-        let link_db = self.state.link_db.clone();
+        let peer_db = self.state.peer_db.clone();
         let session_db = self.state.session_db.clone();
 
-        link_db.lock().await.contains_key(&payload.node_id)
+        peer_db.lock().await.contains_key(&payload.node_id)
             && matches!(
                 session_db.lock().await.get(&payload.node_id),
                 Some(PeerSession {
@@ -590,11 +603,11 @@ impl Node {
     /// * Pongs without corresponding ping requests
     /// * Duplicate or replayed pong messages
     async fn can_take_pong(&self, payload: &PingPongPayload) -> Option<((NodeId, u64), Instant)> {
-        let link_db = self.state.link_db.clone();
+        let peer_db = self.state.peer_db.clone();
         let ping_db = self.state.ping_db.clone();
         let session_db = self.state.session_db.clone();
 
-        if !link_db.lock().await.contains_key(&payload.node_id) {
+        if !peer_db.lock().await.contains_key(&payload.node_id) {
             debug!(
                 node_id = payload.node_id,
                 "received ping/pong from unknown peer, ignoring"
@@ -850,6 +863,9 @@ impl Node {
 
                     peer_session.noise = NoiseState::Transport(transport_state);
 
+                    debug!(node_id = node_id, "Triggering LSA broadcast due to new handshake completion");
+                    self.broadcast_lsa().await;
+
                     return Ok(None);
                 }
 
@@ -873,6 +889,10 @@ impl Node {
                         .context("error converting to transport mode")?;
 
                     peer_session.noise = NoiseState::Transport(transport_state);
+
+                    debug!(node_id = node_id, "Triggering LSA broadcast due to handshake completion");
+                    self.broadcast_lsa().await;
+
                 } else {
                     info!(
                         node_id = node_id,
@@ -960,7 +980,7 @@ impl Node {
     /// from in a specified timeout period. It removes both the peer information
     /// and any associated session state to prevent resource leaks.
     async fn remove_stale_peers(&self) {
-        let link_db = self.state.link_db.clone();
+        let peer_db = self.state.peer_db.clone();
         let session_db = self.state.session_db.clone();
         let timeout = Duration::from_secs(60);
         let now = Instant::now();
@@ -968,8 +988,8 @@ impl Node {
         let mut stale_peers = Vec::new();
 
         {
-            let link_db = link_db.lock().await;
-            for (peer_id, peer_info) in link_db.iter() {
+            let peer_db = peer_db.lock().await;
+            for (peer_id, peer_info) in peer_db.iter() {
                 if now.duration_since(peer_info.last_seen) > timeout {
                     stale_peers.push(*peer_id);
                 }
@@ -982,14 +1002,19 @@ impl Node {
 
         info!("Removing {} stale peers", stale_peers.len());
 
-        let mut link_db = link_db.lock().await;
+        let mut peer_db = peer_db.lock().await;
         let mut session_db = session_db.lock().await;
 
         for peer_id in stale_peers {
-            link_db.remove(&peer_id);
+            peer_db.remove(&peer_id);
             session_db.remove(&peer_id);
         }
+
+        info!("Triggering LSA broadcast due to stale peer removal");
+        self.broadcast_lsa().await;
     }
+
+
 
     /// Sends a ping message to a specific peer.
     ///
@@ -1164,7 +1189,7 @@ impl Node {
     /// from the node's state databases and updates the Prometheus metrics.
     /// It should be called periodically to keep metrics current.
     pub async fn update_metrics(&self, metrics: &Metrics) -> Result<()> {
-        let link_db = self.state.link_db.lock().await;
+        let peer_db = self.state.peer_db.lock().await;
         let session_db = self.state.session_db.lock().await;
 
         let local_ip = self
@@ -1176,7 +1201,7 @@ impl Node {
         let mut connected_count = 0;
 
         // only care about established peers with RTT stats
-        for (peer_id, peer_info) in link_db.iter() {
+        for (peer_id, peer_info) in peer_db.iter() {
             let session = session_db.get(peer_id);
             if session.is_none()
                 || !matches!(session.unwrap().noise, mesh::NoiseState::Transport(_))
@@ -1214,5 +1239,329 @@ impl Node {
 
     pub fn get_port(&self) -> u16 {
         self.connection.unicast_port
+    }
+
+    // ===== Link State Advertisement (LSA) Methods =====
+
+    /// Generates a new Link State Advertisement for this node.
+    ///
+    /// This method creates an LSA containing this node's current view of its
+    /// direct neighbors. The LSA includes a sequence number for ordering and
+    /// timestamp for freshness detection.
+    ///
+    /// # Returns
+    /// A LinkStatePayload containing this node's topology information
+    ///
+    /// # Process
+    /// 1. Increments the LSA sequence number
+    /// 2. Collects list of established neighbor node IDs
+    /// 3. Creates LSA with current timestamp
+    /// 4. Returns the complete LSA payload
+    async fn generate_lsa(&self) -> mesh::LinkStatePayload {
+        let mut sequence_guard = self.lsa_sequence.lock().await;
+        *sequence_guard += 1;
+        let sequence = *sequence_guard;
+        drop(sequence_guard);
+
+        let neighbors = self.get_established_neighbors().await;
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        mesh::LinkStatePayload {
+            node_id: self.id,
+            sequence,
+            timestamp,
+            neighbors,
+        }
+    }
+
+    /// Gets the list of currently established neighbor node IDs.
+    ///
+    /// This method examines the session database to find all peers that have
+    /// completed the handshake process and are ready for communication.
+    ///
+    /// # Returns
+    /// Vector of NodeIds representing directly connected neighbors
+    async fn get_established_neighbors(&self) -> Vec<NodeId> {
+        let session_db = self.state.session_db.lock().await;
+        session_db
+            .iter()
+            .filter_map(|(node_id, session)| {
+                matches!(session.noise, mesh::NoiseState::Transport(_))
+                    .then_some(*node_id)
+            })
+            .collect()
+    }
+
+    /// Broadcasts a Link State Advertisement to all established neighbors.
+    ///
+    /// This method generates a new LSA and floods it to all directly connected
+    /// peers. This enables network-wide topology distribution and maintains
+    /// an up-to-date view of the mesh network structure.
+    ///
+    /// # Triggers
+    /// * New neighbor established (handshake completed)
+    /// * Neighbor lost (connection failure/timeout)
+    /// * Periodic refresh (every 60 seconds)
+    ///
+    /// # Process
+    /// 1. Generates current LSA
+    /// 2. Updates local LSA database
+    /// 3. Sends LSA to all established neighbors
+    /// 4. Logs the broadcast operation
+    pub async fn broadcast_lsa(&self) {
+        let lsa = self.generate_lsa().await;
+        debug!(
+            node_id = self.id,
+            sequence = lsa.sequence,
+            neighbors_count = lsa.neighbors.len(),
+            "Broadcasting LSA"
+        );
+
+        {
+            let mut lsa_db = self.state.link_state_db.lock().await;
+            lsa_db.insert(self.id, lsa.clone());
+        }
+
+        let message = Message::LinkState(lsa);
+        self.send_to_all_neighbors(message).await;
+    }
+
+    /// Handles incoming Link State Advertisement messages.
+    ///
+    /// This method processes LSA messages received from other nodes during
+    /// topology distribution. It determines whether the LSA is newer than
+    /// existing information and floods it to other neighbors if appropriate.
+    ///
+    /// # Freshness Check
+    /// LSAs are considered newer if they have:
+    /// 1. Higher sequence number, OR
+    /// 2. Same sequence number but newer timestamp
+    ///
+    /// # Flooding Logic
+    /// Newer LSAs are stored and flooded to all neighbors except the sender.
+    async fn handle_lsa(&self, payload: mesh::LinkStatePayload, src_addr: SocketAddr) -> Result<()> {
+        debug!(
+            node_id = payload.node_id,
+            sequence = payload.sequence,
+            neighbors_count = payload.neighbors.len(),
+            src_addr = %src_addr,
+            "Received LSA"
+        );
+
+        let should_flood = {
+            let mut lsa_db = self.state.link_state_db.lock().await;
+            
+            // Check if this is newer than what we have
+            match lsa_db.get(&payload.node_id) {
+                Some(existing) => {
+                    if payload.sequence > existing.sequence ||
+                       (payload.sequence == existing.sequence && payload.timestamp > existing.timestamp) {
+                        debug!(
+                            node_id = payload.node_id,
+                            new_seq = payload.sequence,
+                            old_seq = existing.sequence,
+                            "Updating LSA with newer information"
+                        );
+                        lsa_db.insert(payload.node_id, payload.clone());
+                        true
+                    } else {
+                        debug!(
+                            node_id = payload.node_id,
+                            received_seq = payload.sequence,
+                            stored_seq = existing.sequence,
+                            "Ignoring older/duplicate LSA"
+                        );
+                        false
+                    }
+                }
+                None => {
+                    debug!(
+                        node_id = payload.node_id,
+                        sequence = payload.sequence,
+                        "Storing first LSA from node"
+                    );
+                    lsa_db.insert(payload.node_id, payload.clone());
+                    true
+                }
+            }
+        };
+
+        // Flood to other neighbors (except sender)
+        if should_flood {
+            self.flood_lsa_except_sender(payload, src_addr).await;
+        }
+
+        Ok(())
+    }
+
+    /// Floods an LSA to all neighbors except the sender.
+    ///
+    /// This method implements the LSA flooding algorithm by forwarding
+    /// a received LSA to all established neighbors except the one that
+    /// sent it. This prevents routing loops while ensuring topology
+    /// information reaches all nodes in the network.
+    ///
+    /// # Flooding Rules
+    /// * Send to all established neighbors
+    /// * Skip the sender to prevent loops
+    /// * Log failures but continue flooding to other neighbors
+    async fn flood_lsa_except_sender(&self, lsa: mesh::LinkStatePayload, sender_addr: SocketAddr) {
+        let neighbors = self.get_neighbor_addresses().await;
+        let message = mesh::Message::LinkState(lsa.clone());
+        
+        debug!(
+            lsa_node_id = lsa.node_id,
+            sender_addr = %sender_addr,
+            neighbor_count = neighbors.len(),
+            "Flooding LSA to neighbors"
+        );
+        
+        for (node_id, port, addr) in neighbors {
+            // Don't send back to the sender
+            if addr == sender_addr {
+                continue;
+            }
+            
+            if let Err(e) = self.send_unicast_message(message.clone(), port, addr).await {
+                error!(
+                    node_id = node_id,
+                    addr = %addr,
+                    port = port,
+                    error = %e,
+                    "Failed to flood LSA to neighbor"
+                );
+            }
+        }
+    }
+
+    /// Sends a message to all established neighbors.
+    ///
+    /// This method floods a message to all peers that have completed handshakes.
+    /// It's used for LSA distribution and other network-wide communications.
+    ///
+    /// # Arguments
+    /// * `message` - The message to send to all neighbors
+    async fn send_to_all_neighbors(&self, message: Message) {
+        let neighbors = self.get_neighbor_addresses().await;
+        
+        for (node_id, port, addr) in neighbors {
+            if let Err(e) = self.send_unicast_message(message.clone(), port, addr).await {
+                error!(
+                    node_id = node_id,
+                    addr = %addr,
+                    port = port,
+                    error = %e,
+                    "Failed to send message to neighbor"
+                );
+            }
+        }
+    }
+
+    /// Gets the network addresses of all established neighbors.
+    ///
+    /// This method combines information from the peer database (addresses)
+    /// and session database (connection status) to find all neighbors that
+    /// are ready for communication.
+    ///
+    /// # Returns
+    /// Vector of (NodeId, port, SocketAddr) tuples for each established neighbor
+    async fn get_neighbor_addresses(&self) -> Vec<(NodeId, u16, SocketAddr)> {
+        let peer_db = self.state.peer_db.lock().await;
+        let session_db = self.state.session_db.lock().await;
+
+        peer_db
+            .iter()
+            .filter_map(|(node_id, peer_info)| {
+                session_db.get(node_id).and_then(|session| {
+                    matches!(session.noise, mesh::NoiseState::Transport(_))
+                        .then_some((*node_id, peer_info.port, peer_info.addr))
+                })
+            })
+            .collect()
+    }
+
+    /// Periodic LSA refresh task.
+    ///
+    /// This method runs an infinite loop that broadcasts this node's LSA
+    /// at regular intervals to maintain network topology awareness. Regular
+    /// LSA broadcasts ensure that all nodes have up-to-date topology information
+    /// even in the absence of topology changes.
+    pub async fn lsa_refresh(&self) -> ! {
+        let mut interval = time::interval_at(
+            time::Instant::now() + Duration::from_secs(60),
+            Duration::from_secs(60),
+        );
+
+        loop {
+            interval.tick().await;
+            self.broadcast_lsa().await;
+        }
+    }
+
+    /// Removes stale LSAs from the topology database.
+    ///
+    /// This method performs cleanup of LSA records that are older than the
+    /// staleness threshold (180 seconds). It prevents the topology database
+    /// from growing unbounded due to nodes that have left the network.
+    ///
+    /// # Cleanup Process
+    /// * **Staleness Threshold**: Removes LSAs older than 180 seconds
+    /// * **Memory Management**: Prevents database growth from departed nodes
+    /// * **Topology Accuracy**: Maintains current network view
+    ///
+    /// # Staleness Calculation
+    /// LSAs are considered stale if their timestamp is more than 180 seconds
+    /// old compared to the current system time.
+    pub async fn cleanup_stale_lsas(&self) {
+        let mut lsa_db = self.state.link_state_db.lock().await;
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let initial_count = lsa_db.len();
+        lsa_db.retain(|node_id, lsa| {
+            let age = current_time.saturating_sub(lsa.timestamp);
+            if age > 180 {
+                info!(
+                    node_id = node_id,
+                    age = age,
+                    sequence = lsa.sequence,
+                    "Removing stale LSA"
+                );
+                false
+            } else {
+                true
+            }
+        });
+
+        let removed_count = initial_count - lsa_db.len();
+        if removed_count > 0 {
+            info!(
+                removed_count = removed_count,
+                remaining_count = lsa_db.len(),
+                "Cleaned up stale LSAs"
+            );
+        }
+    }
+
+    /// Periodic LSA cleanup task.
+    ///
+    /// This method runs an infinite loop that removes stale LSAs at regular
+    /// intervals to maintain topology database hygiene. Regular cleanup ensures
+    /// that departed nodes don't leave stale entries in the topology view.
+    pub async fn lsa_cleanup(&self) -> ! {
+        let mut interval = time::interval_at(
+            time::Instant::now() + Duration::from_secs(60),
+            Duration::from_secs(60),
+        );
+
+        loop {
+            interval.tick().await;
+            self.cleanup_stale_lsas().await;
+        }
     }
 }
