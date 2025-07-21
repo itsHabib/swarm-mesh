@@ -160,8 +160,7 @@ cargo run --bin mesh-registry
 # Start monitoring stack
 cd docker && docker-compose up -d
 ```
-
-**No manual configuration required!** Prometheus automatically discovers active nodes by querying the mesh-registry service. New nodes are automatically added to monitoring when they join the mesh.
+Prometheus automatically discovers active nodes by querying the mesh-registry service. New nodes are automatically added to monitoring when they join the mesh.
 
 #### Mesh Registry Service
 
